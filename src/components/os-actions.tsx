@@ -22,6 +22,34 @@ export function OsActions({ osId, osNumber, status, canEdit, isAdmin }: Props) {
 
   const targets = OS_STATUSES.filter((candidate) => canTransition(status, candidate));
 
+  async function remove() {
+    // Operacao irreversivel: exige digitar o numero da OS, para que um clique
+    // acidental (ou na OS errada) nao apague nada.
+    const typed = window.prompt(
+      `Excluir definitivamente a OS ${osNumber}?\n\n` +
+        'A OS e todo o histórico dela serão apagados, sem como desfazer. ' +
+        'O número não será reaproveitado.\n\n' +
+        `Para confirmar, digite o número da OS (${osNumber}):`,
+    );
+    if (typed === null) return;
+    if (typed.trim() !== osNumber) {
+      setError('Número não confere. A OS não foi excluída.');
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setBusy('excluir');
+    try {
+      await api.del(`/api/os/${osId}`);
+      router.push('/os');
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : 'Não foi possível excluir a OS.');
+      setBusy(null);
+    }
+  }
+
   async function changeStatus(next: OsStatus) {
     setError(null);
     setNotice(null);
@@ -104,6 +132,24 @@ export function OsActions({ osId, osNumber, status, canEdit, isAdmin }: Props) {
               );
             })}
           </div>
+        </div>
+      ) : null}
+
+      {isAdmin ? (
+        <div className="border-t border-line pt-3">
+          <p className="field-label">Zona de risco</p>
+          <p className="mt-1 text-sm text-ink-500">
+            A exclusão apaga a OS e o histórico dela definitivamente. O número {osNumber} não será
+            reaproveitado.
+          </p>
+          <button
+            type="button"
+            className="btn-danger mt-2"
+            disabled={busy !== null}
+            onClick={() => void remove()}
+          >
+            {busy === 'excluir' ? 'Excluindo…' : 'Excluir OS'}
+          </button>
         </div>
       ) : null}
     </div>

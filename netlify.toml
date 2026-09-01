@@ -1,0 +1,14 @@
+# Configuracao do Netlify.
+#
+# Declara APENAS o empacotamento de arquivos extras: comando de build, diretorio
+# publicado e variaveis de ambiente continuam vindo do painel do site.
+
+[functions]
+  # O papel timbrado e lido do disco em runtime, com o caminho vindo de
+  # OS_DOCX_TEMPLATE - invisivel para o rastreador de dependencias do Next.
+  # Sem esta linha o arquivo nao entra no bundle da funcao e a geracao falha com
+  # "Template do papel timbrado nao encontrado em /var/task/...".
+  #
+  # Redundante com outputFileTracingIncludes em next.config.ts, de proposito:
+  # sao dois mecanismos independentes (Next e Netlify) para o mesmo arquivo.
+  included_files = ["EM CONTA_O&M_papel timbrado.docx"]

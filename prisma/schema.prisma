@@ -1,0 +1,196 @@
+// Schema do O&M OS - sistema de Ordens de Servico da Em Conta Ltda.
+//
+// Valores monetarios sao SEMPRE armazenados como inteiros (centavos) para evitar
+// erros de precisao de ponto flutuante. Horas e quilometragem sao armazenadas
+// como inteiros em centesimos (ex.: 3,5 h => 350).
+//
+// Todos os DateTime usam timestamptz: instantes absolutos, sem ambiguidade de
+// fuso no banco. O fuso de negocio (America/Campo_Grande) e aplicado apenas na
+// camada de negocio/apresentacao.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Conexao da aplicacao (endpoint pooled do Neon).
+  url       = env("DATABASE_URL")
+  // Conexao direta usada por prisma migrate/introspection. Ver docs/OS.md.
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  name               String
+  passwordHash       String
+  /// "ADMIN" | "USER" - validado na camada de aplicacao (src/lib/auth/roles.ts).
+  role               String   @default("USER")
+  active             Boolean  @default(true)
+  /// Obriga a definicao de uma nova senha antes de usar o sistema.
+  /// Marcado para o administrador provisionado pelo seed.
+  mustChangePassword Boolean  @default(false)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+
+  sessions           Session[]
+  responsible        Responsible?
+  createdOrders      ServiceOrder[]      @relation("ServiceOrderCreatedBy")
+  updatedOrders      ServiceOrder[]      @relation("ServiceOrderUpdatedBy")
+  serviceOrderEvents ServiceOrderEvent[]
+  settingUpdates     Setting[]
+
+  @@index([role, active])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Institution {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  serviceOrders ServiceOrder[]
+
+  @@index([active, name])
+}
+
+model Responsible {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  /// Vinculo opcional com um usuario do sistema.
+  userId    String?  @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  serviceOrders ServiceOrder[]
+
+  @@index([active, name])
+}
+
+model Plant {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  location  String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  serviceOrders ServiceOrder[]
+
+  @@index([active, name])
+}
+
+/// Contador transacional por dia. Garante numeracao sequencial sem race
+/// condition: a reserva usa INSERT ... ON CONFLICT DO UPDATE ... RETURNING,
+/// atomico no PostgreSQL.
+model OrderSequence {
+  /// Dia no fuso de negocio, formato AAAAMMDD.
+  day     String @id
+  lastSeq Int    @default(0)
+}
+
+model ServiceOrder {
+  id     String @id @default(cuid())
+  /// Formato AAAAMMDDNNN. Unico globalmente.
+  number String @unique
+
+  title         String
+  plantId       String
+  institutionId String
+  responsibleId String
+  /// Previsao de execucao (data, armazenada em UTC as 12:00 do dia de negocio).
+  expectedDate  DateTime @db.Timestamptz(3)
+  location      String
+  /// Sempre persistida em CAIXA ALTA.
+  description   String
+
+  /// "ABERTA" | "EM_ANDAMENTO" | "AGUARDANDO" | "CONCLUIDA" | "CANCELADA"
+  status   String   @default("ABERTA")
+  openedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  // --- Custos do atendimento (snapshot historico: os valores unitarios usados
+  // no momento do calculo ficam gravados na propria OS) ---
+  technicianCount          Int
+  /// Horas por tecnico em centesimos (3,5 h => 350).
+  hoursPerTechnicianCenti  Int
+  /// Quilometragem em centesimos de km (200 km => 20000).
+  outboundKmCenti          Int
+  returnKmCenti            Int
+  /// Valor da hora tecnica em centavos no momento do calculo (R$ 150,00 => 15000).
+  technicalHourlyRateCents Int
+  /// Valor do km em centavos no momento do calculo (R$ 1,50 => 150).
+  kmRateCents              Int
+  /// Subtotais e total em centavos, recalculados sempre no backend.
+  technicalSubtotalCents   Int
+  travelSubtotalCents      Int
+  totalCents               Int
+
+  createdById String
+  updatedById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  plant       Plant       @relation(fields: [plantId], references: [id])
+  institution Institution @relation(fields: [institutionId], references: [id])
+  responsible Responsible @relation(fields: [responsibleId], references: [id])
+  createdBy   User        @relation("ServiceOrderCreatedBy", fields: [createdById], references: [id])
+  updatedBy   User?       @relation("ServiceOrderUpdatedBy", fields: [updatedById], references: [id])
+
+  events ServiceOrderEvent[]
+
+  @@index([status])
+  @@index([openedAt])
+  @@index([expectedDate])
+  @@index([institutionId])
+  @@index([responsibleId])
+  @@index([plantId])
+  @@index([status, expectedDate])
+  @@index([createdById])
+}
+
+model ServiceOrderEvent {
+  id             String   @id @default(cuid())
+  serviceOrderId String
+  /// "CRIADA" | "STATUS_ALTERADO" | "RESPONSAVEL_ALTERADO" | "PREVISAO_ALTERADA"
+  /// | "INFORMACOES_EDITADAS" | "CUSTOS_ALTERADOS" | "DOCUMENTO_GERADO"
+  type           String
+  /// Resumo legivel do evento (sem dados sensiveis).
+  message        String
+  /// JSON serializado com os campos alterados (apenas dados de negocio).
+  details        String?
+  userId         String?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([serviceOrderId, createdAt])
+}
+
+/// Configuracoes administrativas (valores unitarios, etc.). Valores em texto para
+/// permitir alteracao sem migration; interpretados pela camada de configuracao.
+model Setting {
+  key         String   @id
+  value       String
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+  updatedById String?
+
+  updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+}

@@ -1,0 +1,140 @@
+@import 'tailwindcss';
+
+/*
+ * Design system do O&M OS.
+ * As cores primarias sao as do papel timbrado oficial da Em Conta Ltda
+ * (#124489 / #006AAE), amostradas diretamente do banner do cabecalho.
+ */
+@theme {
+  --color-brand-50: #eef3fa;
+  --color-brand-100: #d8e4f4;
+  --color-brand-200: #b4cae9;
+  --color-brand-300: #82a7d9;
+  --color-brand-400: #4b7cc4;
+  --color-brand-500: #2559a5;
+  --color-brand-600: #124489;
+  --color-brand-700: #0f3a74;
+  --color-brand-800: #0d305f;
+  --color-brand-900: #0a2549;
+
+  --color-accent-400: #2d92d0;
+  --color-accent-500: #0a7ab9;
+  --color-accent-600: #006aae;
+
+  --color-ink-500: #6b7280;
+  --color-ink-700: #374151;
+  --color-ink-900: #1f2937;
+
+  --color-surface: #f5f7fa;
+  --color-line: #d6deea;
+
+  --font-sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--color-surface);
+    color: var(--color-ink-900);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Foco visivel e consistente em todos os controles (acessibilidade). */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--color-accent-600);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+}
+
+/*
+ * Base dos botoes. Declarada como @utility (e nao dentro de @layer components)
+ * porque o Tailwind v4 so permite @apply de utilitarios reais - e as variantes
+ * abaixo reaproveitam esta base.
+ */
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold
+    transition-colors disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-line bg-white shadow-sm;
+  }
+
+  .field-label {
+    @apply mb-1 block text-xs font-semibold tracking-wide text-ink-500 uppercase;
+  }
+
+  .field-input {
+    @apply w-full rounded-md border border-line bg-white px-3 py-2 text-sm text-ink-900
+      transition-colors placeholder:text-gray-400
+      focus:border-accent-600 focus:ring-2 focus:ring-accent-600/20 focus:outline-none
+      disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-500;
+  }
+
+  .field-error {
+    @apply mt-1 block text-xs font-medium text-red-600;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+  }
+
+  .btn-secondary {
+    @apply btn border border-line bg-white text-ink-700 hover:bg-brand-50;
+  }
+
+  .btn-danger {
+    @apply btn border border-red-200 bg-white text-red-700 hover:bg-red-50;
+  }
+
+  .btn-ghost {
+    @apply btn text-ink-700 hover:bg-brand-50;
+  }
+
+  .section-title {
+    @apply text-sm font-bold tracking-wide text-brand-600 uppercase;
+  }
+
+  /* Estados dos cards e badges do Kanban. */
+  .status-aberta {
+    @apply bg-blue-50 text-blue-800 ring-blue-200;
+  }
+  .status-andamento {
+    @apply bg-amber-50 text-amber-800 ring-amber-200;
+  }
+  .status-aguardando {
+    @apply bg-violet-50 text-violet-800 ring-violet-200;
+  }
+  .status-concluida {
+    @apply bg-emerald-50 text-emerald-800 ring-emerald-200;
+  }
+  .status-cancelada {
+    @apply bg-gray-100 text-gray-700 ring-gray-300;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset;
+  }
+}
+
+/* Impressao: mantem apenas o conteudo da OS. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  .card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+}

@@ -1,0 +1,24 @@
+node_modules/
+.next/
+out/
+build/
+
+# Ambiente: nunca versionar credenciais
+.env
+.env.local
+.env.*.local
+
+*.tsbuildinfo
+next-env.d.ts
+coverage/
+
+# Documentos gerados durante testes manuais (a aplicacao nao persiste arquivos)
+/*.pdf
+/*.docx
+!EM CONTA_O&M_papel timbrado.docx
+
+# Artefatos do banco SQLite usado antes da migracao para PostgreSQL
+prisma/*.db
+prisma/*.db-journal
+prisma/*.db-wal
+prisma/*.db-shm

@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
-import { requireUser } from '@/lib/auth/guard';
+import { requireAdmin, requireUser } from '@/lib/auth/guard';
 import { assertSameOrigin, notFound, withErrorHandling } from '@/lib/http';
 import { parseOrThrow, readJson } from '@/lib/validation/common';
 import { updateOsSchema } from '@/lib/validation/os';
-import { getServiceOrderDetail, getServiceOrderEvents, updateServiceOrder } from '@/lib/os/service';
+import {
+  deleteServiceOrder,
+  getServiceOrderDetail,
+  getServiceOrderEvents,
+  updateServiceOrder,
+} from '@/lib/os/service';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,4 +30,13 @@ export const PATCH = withErrorHandling(async (request: Request, context: Context
   const { id } = await context.params;
   const input = parseOrThrow(updateOsSchema, await readJson(request));
   return NextResponse.json(await updateServiceOrder(id, input, actor));
+});
+
+/** Exclusao definitiva da OS e do historico dela. Restrita a administradores. */
+export const DELETE = withErrorHandling(async (request: Request, context: Context) => {
+  const actor = await requireAdmin();
+  assertSameOrigin(request);
+  const { id } = await context.params;
+  const removed = await deleteServiceOrder(id, actor);
+  return NextResponse.json({ ok: true, deleted: true, number: removed.number });
 });

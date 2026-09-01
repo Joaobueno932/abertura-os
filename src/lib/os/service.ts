@@ -439,6 +439,36 @@ export async function changeServiceOrderStatus(
   }, TX_OPTIONS);
 }
 
+/**
+ * Exclui uma OS definitivamente, com o historico dela.
+ *
+ * E a unica operacao destrutiva do sistema, existe para limpar OS abertas por
+ * engano ou em teste, e por isso e restrita a administradores (verificado na
+ * rota, com `requireAdmin`). Os eventos saem junto por cascade declarado no
+ * schema; nenhum outro registro aponta para ServiceOrder.
+ *
+ * O contador diario de OrderSequence NAO retrocede: o numero da OS excluida fica
+ * vago para sempre, nunca e reaproveitado. Reutiliza-lo faria dois documentos
+ * diferentes circularem com a mesma identificacao.
+ */
+export async function deleteServiceOrder(
+  id: string,
+  actor: SessionUser,
+): Promise<{ id: string; number: string }> {
+  if (!isAdmin(actor.role)) {
+    throw forbidden('Somente um administrador pode excluir uma Ordem de Serviço.');
+  }
+
+  const existing = await prisma.serviceOrder.findUnique({
+    where: { id },
+    select: { id: true, number: true },
+  });
+  if (!existing) throw notFound('Ordem de Serviço não encontrada.');
+
+  await prisma.serviceOrder.delete({ where: { id } });
+  return existing;
+}
+
 export async function recordDocumentGenerated(
   serviceOrderId: string,
   fileName: string,

@@ -413,6 +413,21 @@ detalhamento dos campos alterados (valor anterior → novo):
 Só dados de negócio já visíveis na própria OS são gravados — nenhum segredo,
 token ou credencial.
 
+### Exclusão de uma OS
+
+`DELETE /api/os/[id]` remove a OS **definitivamente**, junto com todo o histórico
+dela (os eventos saem por `onDelete: Cascade`). É a única operação destrutiva do
+sistema e existe para descartar OS abertas por engano ou em testes.
+
+Restrita a administradores, verificado no servidor com `requireAdmin` — um
+usuário comum recebe 403 mesmo chamando a rota diretamente. Na interface, o botão
+só aparece para administradores e exige digitar o número da OS para confirmar.
+
+O contador de `OrderSequence` **não retrocede**: o número da OS excluída fica
+vago para sempre. Reaproveitá-lo faria dois documentos diferentes circularem com
+a mesma identificação — o mesmo motivo pelo qual a numeração nunca é gerada no
+frontend.
+
 ## Segurança
 
 - Senhas com **scrypt** (`node:crypto`, N=2^15), sem dependência nativa.

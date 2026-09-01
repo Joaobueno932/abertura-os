@@ -24,6 +24,7 @@ const plants = await import('@/app/api/admin/usinas/route');
 const users = await import('@/app/api/admin/usuarios/route');
 const settings = await import('@/app/api/admin/configuracoes/route');
 const osRoute = await import('@/app/api/os/route');
+const osById = await import('@/app/api/os/[id]/route');
 
 type Session = Awaited<ReturnType<typeof createUser>> | null;
 
@@ -183,6 +184,36 @@ describe('administrador', () => {
       where: { id: catalog.institution.id },
     });
     expect(stored.active).toBe(false);
+  });
+
+  it('exclui uma OS pela rota, e o usuario comum nao consegue', async () => {
+    const admin = await createUser({ role: 'ADMIN' });
+    actAs(admin);
+    await seedRates();
+    const catalog = await seedCatalog();
+
+    const create = await osRoute.POST(
+      jsonRequest('http://localhost/api/os', 'POST', osPayload(catalog)),
+    );
+    const order = (await create.json()) as { id: string; number: string };
+
+    // Usuario comum e barrado na propria rota, nao apenas na interface.
+    actAs(await createUser({ role: 'USER' }));
+    const denied = await osById.DELETE(
+      jsonRequest(`http://localhost/api/os/${order.id}`, 'DELETE'),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(denied.status).toBe(403);
+    expect(await prisma.serviceOrder.findUnique({ where: { id: order.id } })).not.toBeNull();
+
+    actAs(admin);
+    const removal = await osById.DELETE(
+      jsonRequest(`http://localhost/api/os/${order.id}`, 'DELETE'),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+    expect(removal.status).toBe(200);
+    await expect(removal.json()).resolves.toMatchObject({ deleted: true, number: order.number });
+    expect(await prisma.serviceOrder.findUnique({ where: { id: order.id } })).toBeNull();
   });
 
   it('exclui de fato um cadastro nunca utilizado', async () => {

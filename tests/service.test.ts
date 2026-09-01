@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import {
   changeServiceOrderStatus,
   createServiceOrder,
+  deleteServiceOrder,
   getServiceOrderEvents,
   listServiceOrders,
   loadKanban,
@@ -344,6 +345,60 @@ describe('busca, filtros e paginacao', () => {
     expect(board.items).toHaveLength(2);
     expect(board.totals.ABERTA).toBe(1);
     expect(board.totals.EM_ANDAMENTO).toBe(1);
+  });
+});
+
+describe('exclusao de OS', () => {
+  it('o administrador exclui a OS junto com o historico dela', async () => {
+    const { catalog, actor, admin } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    await changeServiceOrderStatus(order.id, 'EM_ANDAMENTO', actor);
+    expect(await getServiceOrderEvents(order.id)).not.toHaveLength(0);
+
+    const removed = await deleteServiceOrder(order.id, admin);
+    expect(removed.number).toBe(order.number);
+
+    expect(await prisma.serviceOrder.findUnique({ where: { id: order.id } })).toBeNull();
+    // Os eventos saem por cascade: nao pode sobrar historico orfao.
+    expect(await prisma.serviceOrderEvent.count({ where: { serviceOrderId: order.id } })).toBe(0);
+  });
+
+  it('usuario comum nao exclui, mesmo chamando o servico direto', async () => {
+    const { catalog, actor } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    await expect(deleteServiceOrder(order.id, actor)).rejects.toMatchObject({ status: 403 });
+    expect(await prisma.serviceOrder.findUnique({ where: { id: order.id } })).not.toBeNull();
+  });
+
+  it('OS inexistente devolve 404', async () => {
+    const { admin } = await setup();
+    await expect(deleteServiceOrder('id-que-nao-existe', admin)).rejects.toMatchObject({
+      status: 404,
+    });
+  });
+
+  it('o numero da OS excluida nunca e reaproveitado', async () => {
+    const { catalog, actor, admin } = await setup();
+    const first = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    await deleteServiceOrder(first.id, admin);
+
+    const second = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    expect(second.number).not.toBe(first.number);
+    expect(second.number.endsWith('002')).toBe(true);
+  });
+
+  it('excluir uma OS nao afeta as demais', async () => {
+    const { catalog, actor, admin } = await setup();
+    const keep = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    const drop = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    await deleteServiceOrder(drop.id, admin);
+
+    const list = await listServiceOrders(osFiltersSchema.parse({}));
+    expect(list.total).toBe(1);
+    expect(list.items[0]?.id).toBe(keep.id);
+    expect(await getServiceOrderEvents(keep.id)).not.toHaveLength(0);
   });
 });
 

@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/lib/auth/password';
 import { DEFAULT_RATES, SETTING_KEYS } from '../src/lib/rates';
+import { DEFAULT_CANCELLATION_REASONS } from '../src/lib/os/cancellation-reasons';
 
 /**
  * Seed idempotente do O&M OS.
@@ -11,7 +12,7 @@ import { DEFAULT_RATES, SETTING_KEYS } from '../src/lib/rates';
  */
 const prisma = new PrismaClient();
 
-/** Instituicoes iniciais. Ficam no banco, nunca hardcoded no frontend. */
+/** Clientes/instituicoes iniciais. Ficam no banco, nunca hardcoded no frontend. */
 const INSTITUTIONS = ['SESI', 'SENAI', 'FIEMS', 'SEMAPA', 'ADILSON'];
 
 const MIN_PASSWORD_LENGTH = 10;
@@ -69,6 +70,18 @@ async function seedInstitutions(): Promise<void> {
 }
 
 /**
+ * Motivos de cancelamento de fabrica. Um administrador pode acrescentar outros
+ * em /admin/motivos-cancelamento; o upsert vazio preserva o que ja existe,
+ * inclusive um motivo que tenha sido desativado de proposito.
+ */
+async function seedCancellationReasons(): Promise<void> {
+  for (const label of DEFAULT_CANCELLATION_REASONS) {
+    await prisma.cancellationReason.upsert({ where: { label }, create: { label }, update: {} });
+  }
+  console.log(`[seed] motivos de cancelamento garantidos: ${DEFAULT_CANCELLATION_REASONS.length}`);
+}
+
+/**
  * Garante os valores de fabrica sem sobrescrever ajustes ja feitos por um
  * administrador (update vazio no upsert).
  */
@@ -90,9 +103,11 @@ async function seedRates(): Promise<void> {
 async function main(): Promise<void> {
   await seedAdmin();
   await seedInstitutions();
+  await seedCancellationReasons();
   await seedRates();
   console.log(
-    '[seed] concluido. Cadastre usinas e responsaveis em /admin antes de abrir a primeira OS.',
+    '[seed] concluido. Cadastre usinas em /cadastros/usinas e responsaveis em /admin/responsaveis ' +
+      'antes de abrir a primeira OS.',
   );
 }
 

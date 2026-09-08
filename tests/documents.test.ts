@@ -163,6 +163,29 @@ describe('DOCX gerado a partir do papel timbrado', () => {
     expect(body).toContain('TOTAL DO ATENDIMENTO');
   });
 
+  it('isola o valor do atendimento em uma pagina propria', async () => {
+    const generated = await JSZip.loadAsync(Buffer.from(docx));
+    const body = await generated.file('word/document.xml')!.async('string');
+
+    expect(body).toContain('VALOR DO ATENDIMENTO');
+    expect(body).not.toContain('CUSTOS DO ATENDIMENTO');
+
+    // A quebra de pagina vem ANTES da faixa de valor, nunca depois.
+    const pageBreakAt = body.indexOf('<w:br w:type="page"/>');
+    expect(pageBreakAt).toBeGreaterThan(-1);
+    expect(pageBreakAt).toBeLessThan(body.indexOf('VALOR DO ATENDIMENTO'));
+    expect(body.indexOf('DESCRIÇÃO')).toBeLessThan(pageBreakAt);
+  });
+
+  it('lista os tecnicos do atendimento', async () => {
+    const generated = await JSZip.loadAsync(Buffer.from(docx));
+    const body = await generated.file('word/document.xml')!.async('string');
+    expect(body).toContain('TÉCNICOS DO ATENDIMENTO');
+    expect(body).toContain('Tecnico Um');
+    expect(body).toContain('Tecnico Dois');
+    expect(body).toContain('CLIENTE/INSTITUIÇÃO');
+  });
+
   it('contem a area de aprovacao do cliente', async () => {
     const generated = await JSZip.loadAsync(Buffer.from(docx));
     const body = await generated.file('word/document.xml')!.async('string');
@@ -236,7 +259,8 @@ describe('PDF gerado', () => {
   it('desenha o cabecalho e o rodape em todas as paginas', async () => {
     const reloaded = await PDFDocument.load(pdf);
     const pageCount = reloaded.getPageCount();
-    expect(pageCount).toBeGreaterThanOrEqual(1);
+    // O valor do atendimento comeca em pagina propria: sempre ha uma segunda.
+    expect(pageCount).toBeGreaterThanOrEqual(2);
 
     // Uma invocacao de XObject por banner, por pagina.
     const content = extractPdfText(pdf);
@@ -254,6 +278,7 @@ describe('PDF gerado', () => {
     expect(text).toContain('R$ 600,00');
     expect(text).toContain('R$ 1.500,00');
     expect(text).toContain('TOTAL DO ATENDIMENTO');
+    expect(text).toContain('VALOR DO ATENDIMENTO');
     expect(text).toContain('APROVA');
   });
 

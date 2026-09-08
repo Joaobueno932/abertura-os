@@ -8,6 +8,12 @@ import { calculateCosts, CostValidationError } from '@/lib/os/costs';
 import { formatBRL, formatCenti, parseToCenti } from '@/lib/money';
 import type { Options } from '@/lib/os/options';
 
+export type TechnicianValue = {
+  /** Vazio = tecnico digitado manualmente. */
+  responsibleId: string;
+  name: string;
+};
+
 export type OsFormValues = {
   title: string;
   plantId: string;
@@ -17,6 +23,7 @@ export type OsFormValues = {
   location: string;
   description: string;
   technicianCount: string;
+  technicians: TechnicianValue[];
   hoursPerTechnician: string;
   outboundKm: string;
   returnKm: string;
@@ -41,31 +48,86 @@ const EMPTY: OsFormValues = {
   location: '',
   description: '',
   technicianCount: '1',
+  technicians: [{ responsibleId: '', name: '' }],
   hoursPerTechnician: '',
   outboundKm: '0',
   returnKm: '0',
 };
 
+/** Teto de campos abertos de uma vez, para nao travar a tela por um digito errado. */
+const MAX_TECHNICIAN_FIELDS = 20;
+
 function optionLabel(option: { name: string; active?: boolean }): string {
   return option.active === false ? `${option.name} (inativo)` : option.name;
 }
 
+/** Ajusta a lista de tecnicos ao total informado, preservando o que ja foi digitado. */
+function resizeTechnicians(current: TechnicianValue[], size: number): TechnicianValue[] {
+  if (current.length === size) return current;
+  if (current.length > size) return current.slice(0, size);
+  return [
+    ...current,
+    ...Array.from({ length: size - current.length }, () => ({ responsibleId: '', name: '' })),
+  ];
+}
+
 export function OsForm({ options, rates, osId, initial }: Props) {
   const router = useRouter();
-  const [values, setValues] = useState<OsFormValues>({ ...EMPTY, ...initial });
+  const [values, setValues] = useState<OsFormValues>(() => {
+    const merged = { ...EMPTY, ...initial };
+    const count = Number(merged.technicianCount);
+    const size = Number.isInteger(count) && count > 0 ? Math.min(count, MAX_TECHNICIAN_FIELDS) : 1;
+    return { ...merged, technicians: resizeTechnicians(merged.technicians ?? [], size) };
+  });
   const [fields, setFields] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const set = (key: keyof OsFormValues) => (event: { target: { value: string } }) => {
-    setValues((current) => ({ ...current, [key]: event.target.value }));
+  const clearFieldError = (key: string) =>
     setFields((current) => {
       if (!current[key]) return current;
       const next = { ...current };
       delete next[key];
       return next;
     });
+
+  const set = (key: keyof OsFormValues) => (event: { target: { value: string } }) => {
+    setValues((current) => ({ ...current, [key]: event.target.value }));
+    clearFieldError(key);
   };
+
+  /**
+   * A quantidade de tecnicos governa duas coisas ao mesmo tempo: o calculo do
+   * valor e quantos campos de tecnico ficam abertos. Manter as duas em um unico
+   * estado evita cobrar por um tecnico que ninguem identificou.
+   */
+  function setTechnicianCount(raw: string) {
+    const parsed = Number(raw);
+    setValues((current) => {
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return { ...current, technicianCount: raw };
+      }
+      return {
+        ...current,
+        technicianCount: raw,
+        technicians: resizeTechnicians(current.technicians, Math.min(parsed, MAX_TECHNICIAN_FIELDS)),
+      };
+    });
+    clearFieldError('technicianCount');
+    clearFieldError('technicians');
+  }
+
+  function setTechnician(index: number, patch: Partial<TechnicianValue>) {
+    setValues((current) => ({
+      ...current,
+      technicians: current.technicians.map((technician, position) =>
+        position === index ? { ...technician, ...patch } : technician,
+      ),
+    }));
+    clearFieldError(`technicians.${index}.name`);
+    clearFieldError(`technicians.${index}.responsibleId`);
+    clearFieldError('technicians');
+  }
 
   /**
    * Previa dos custos calculada com a MESMA funcao usada no backend. O valor
@@ -121,6 +183,10 @@ export function OsForm({ options, rates, osId, initial }: Props) {
       location: values.location,
       description: values.description,
       technicianCount: values.technicianCount,
+      technicians: values.technicians.map((technician) => ({
+        responsibleId: technician.responsibleId || null,
+        name: technician.name,
+      })),
       hoursPerTechnician: values.hoursPerTechnician,
       outboundKm: values.outboundKm || '0',
       returnKm: values.returnKm || '0',
@@ -161,8 +227,8 @@ export function OsForm({ options, rates, osId, initial }: Props) {
 
       {noOptions ? (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
-          É necessário ter ao menos uma usina, uma instituição e um responsável ativos cadastrados
-          para abrir uma OS. Solicite o cadastro a um administrador.
+          É necessário ter ao menos uma usina, um cliente/instituição e um responsável ativos
+          cadastrados para abrir uma OS.
         </p>
       ) : null}
 
@@ -210,7 +276,7 @@ export function OsForm({ options, rates, osId, initial }: Props) {
 
           <div>
             <label htmlFor="institutionId" className="field-label">
-              Instituição <span aria-hidden className="text-red-500">*</span>
+              Cliente/Instituição <span aria-hidden className="text-red-500">*</span>
             </label>
             <select
               id="institutionId"
@@ -232,7 +298,7 @@ export function OsForm({ options, rates, osId, initial }: Props) {
 
           <div>
             <label htmlFor="responsibleId" className="field-label">
-              Responsável <span aria-hidden className="text-red-500">*</span>
+              Responsável pela OS <span aria-hidden className="text-red-500">*</span>
             </label>
             <select
               id="responsibleId"
@@ -240,6 +306,7 @@ export function OsForm({ options, rates, osId, initial }: Props) {
               required
               value={values.responsibleId}
               onChange={set('responsibleId')}
+              aria-describedby="responsible-hint"
               aria-invalid={Boolean(fields.responsibleId)}
             >
               <option value="">Selecione…</option>
@@ -249,6 +316,10 @@ export function OsForm({ options, rates, osId, initial }: Props) {
                 </option>
               ))}
             </select>
+            <p id="responsible-hint" className="mt-1 text-xs text-ink-500">
+              Preenchido com quem está abrindo a OS. Responde pela ordem — não é necessariamente o
+              técnico que vai até o local.
+            </p>
             {fieldError('responsibleId')}
           </div>
 
@@ -287,6 +358,98 @@ export function OsForm({ options, rates, osId, initial }: Props) {
       </section>
 
       <section className="card p-4 sm:p-5">
+        <h2 className="section-title">Técnicos do atendimento</h2>
+        <p className="mt-1 text-xs text-ink-500">
+          Informe quem vai até o local. Cada técnico pode ser vinculado a um cadastro ou digitado.
+        </p>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div>
+            <label htmlFor="technicianCount" className="field-label">
+              Quantidade de técnicos <span aria-hidden className="text-red-500">*</span>
+            </label>
+            <input
+              id="technicianCount"
+              type="number"
+              min={1}
+              max={MAX_TECHNICIAN_FIELDS}
+              step={1}
+              className="field-input"
+              required
+              value={values.technicianCount}
+              onChange={(event) => setTechnicianCount(event.target.value)}
+              aria-invalid={Boolean(fields.technicianCount)}
+            />
+            {fieldError('technicianCount')}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4">
+          {values.technicians.map((technician, index) => {
+            const selectId = `technician-${index}-responsibleId`;
+            const nameId = `technician-${index}-name`;
+            const manual = technician.responsibleId === '';
+            return (
+              <div
+                key={index}
+                className="grid gap-3 rounded-md border border-line p-3 md:grid-cols-2"
+              >
+                <div>
+                  <label htmlFor={selectId} className="field-label">
+                    Técnico {index + 1}
+                  </label>
+                  <select
+                    id={selectId}
+                    className="field-input"
+                    value={technician.responsibleId}
+                    onChange={(event) =>
+                      setTechnician(index, {
+                        responsibleId: event.target.value,
+                        // Vinculo escolhido: o nome vem do cadastro, no servidor.
+                        name: event.target.value ? '' : technician.name,
+                      })
+                    }
+                    aria-invalid={Boolean(fields[`technicians.${index}.responsibleId`])}
+                  >
+                    <option value="">Digitar nome…</option>
+                    {options.responsibles.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {optionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                  {fieldError(`technicians.${index}.responsibleId`)}
+                </div>
+
+                {manual ? (
+                  <div>
+                    <label htmlFor={nameId} className="field-label">
+                      Nome do técnico <span aria-hidden className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id={nameId}
+                      className="field-input"
+                      maxLength={120}
+                      value={technician.name}
+                      onChange={(event) => setTechnician(index, { name: event.target.value })}
+                      aria-invalid={Boolean(fields[`technicians.${index}.name`])}
+                      placeholder="Nome completo"
+                    />
+                    {fieldError(`technicians.${index}.name`)}
+                  </div>
+                ) : (
+                  <p className="self-end pb-2 text-sm text-ink-500">
+                    Vinculado ao cadastro selecionado.
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {fieldError('technicians')}
+      </section>
+
+      <section className="card p-4 sm:p-5">
         <h2 className="section-title">Descrição</h2>
         <div className="mt-4">
           <label htmlFor="description" className="field-label">
@@ -311,31 +474,13 @@ export function OsForm({ options, rates, osId, initial }: Props) {
       </section>
 
       <section className="card p-4 sm:p-5">
-        <h2 className="section-title">Custos do atendimento</h2>
+        <h2 className="section-title">Valor do atendimento</h2>
         <p className="mt-1 text-xs text-ink-500">
           Valores vigentes: {formatBRL(rates.technicalHourlyRateCents)} por hora técnica ·{' '}
           {formatBRL(rates.kmRateCents)} por quilômetro.
         </p>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div>
-            <label htmlFor="technicianCount" className="field-label">
-              Quantidade de técnicos <span aria-hidden className="text-red-500">*</span>
-            </label>
-            <input
-              id="technicianCount"
-              type="number"
-              min={1}
-              step={1}
-              className="field-input"
-              required
-              value={values.technicianCount}
-              onChange={set('technicianCount')}
-              aria-invalid={Boolean(fields.technicianCount)}
-            />
-            {fieldError('technicianCount')}
-          </div>
-
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <div>
             <label htmlFor="hoursPerTechnician" className="field-label">
               Horas por técnico <span aria-hidden className="text-red-500">*</span>

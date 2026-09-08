@@ -34,7 +34,11 @@ export default async function OsListPage({ searchParams }: { searchParams: Searc
   const filters = parsed.success ? parsed.data : osFiltersSchema.parse({});
 
   const [result, options] = await Promise.all([listServiceOrders(filters), loadFilterOptions()]);
-  const { items, total, page, totalPages } = result;
+  const { items, total, page, totalPages, sums } = result;
+
+  // Somatorio da pagina exibida; `sums` traz o do filtro inteiro.
+  const pageTotalCents = items.reduce((sum, order) => sum + order.totalCents, 0);
+  const pageTechnicians = items.reduce((sum, order) => sum + order.technicianCount, 0);
 
   return (
     <div className="grid gap-5">
@@ -70,9 +74,10 @@ export default async function OsListPage({ searchParams }: { searchParams: Searc
                 <tr className="border-b border-line bg-brand-50/60 text-left">
                   <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Nº</th>
                   <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Título</th>
-                  <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Instituição</th>
+                  <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Cliente/Instituição</th>
                   <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Usina</th>
                   <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Responsável</th>
+                  <th scope="col" className="px-4 py-3 text-right font-semibold text-ink-700">Técnicos</th>
                   <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Abertura</th>
                   <th scope="col" className="px-4 py-3 font-semibold text-ink-700">Previsão</th>
                   <th scope="col" className="px-4 py-3 text-right font-semibold text-ink-700">Total</th>
@@ -101,6 +106,9 @@ export default async function OsListPage({ searchParams }: { searchParams: Searc
                       <td className="px-4 py-3 text-ink-700">{order.institution.name}</td>
                       <td className="px-4 py-3 text-ink-700">{order.plant.name}</td>
                       <td className="px-4 py-3 text-ink-700">{order.responsible.name}</td>
+                      <td className="px-4 py-3 text-right whitespace-nowrap text-ink-700">
+                        {order.technicianCount}
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap text-ink-700">
                         {formatDateBR(order.openedAt)}
                       </td>
@@ -121,6 +129,35 @@ export default async function OsListPage({ searchParams }: { searchParams: Searc
                   );
                 })}
               </tbody>
+              {/* Linha de fechamento: soma o que esta na tela e, quando ha mais
+                  de uma pagina, o total do filtro inteiro (somado no banco). */}
+              <tfoot>
+                <tr className="border-t-2 border-line bg-brand-50/60 text-ink-900">
+                  <th scope="row" colSpan={5} className="px-4 py-3 text-left font-semibold">
+                    Somatório desta página ({items.length}{' '}
+                    {items.length === 1 ? 'registro' : 'registros'})
+                  </th>
+                  <td className="px-4 py-3 text-right font-semibold">{pageTechnicians}</td>
+                  <td colSpan={2} />
+                  <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
+                    {formatBRL(pageTotalCents)}
+                  </td>
+                  <td />
+                </tr>
+                {totalPages > 1 ? (
+                  <tr className="border-t border-line bg-brand-50/40 text-ink-700">
+                    <th scope="row" colSpan={5} className="px-4 py-3 text-left font-semibold">
+                      Somatório do filtro ({total} {total === 1 ? 'registro' : 'registros'})
+                    </th>
+                    <td className="px-4 py-3 text-right font-semibold">{sums.technicianCount}</td>
+                    <td colSpan={2} />
+                    <td className="px-4 py-3 text-right font-bold whitespace-nowrap text-brand-600">
+                      {formatBRL(sums.totalCents)}
+                    </td>
+                    <td />
+                  </tr>
+                ) : null}
+              </tfoot>
             </table>
           </div>
 

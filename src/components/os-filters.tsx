@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useState, useTransition, type FormEvent } from 'react';
 import { OS_STATUSES, STATUS_LABEL } from '@/lib/os/status';
+import { RECORD_KINDS } from '@/lib/validation/os';
 
 export type FilterOption = { id: string; name: string };
 
@@ -16,6 +17,16 @@ type Props = {
   options: FilterOptions;
   /** O painel usa a versao compacta; a listagem completa mostra os filtros de data. */
   variant?: 'compact' | 'full';
+  /**
+   * Onde OS e chamados dividem a tela (o painel), o filtro de tipo aparece.
+   * Nas listagens de um tipo so ele nao faz sentido.
+   */
+  showKind?: boolean;
+};
+
+const KIND_LABEL: Record<(typeof RECORD_KINDS)[number], string> = {
+  OS: 'Ordens de Serviço',
+  CHAMADO: 'Chamados da concessionária',
 };
 
 const DATE_FILTERS = [
@@ -25,7 +36,7 @@ const DATE_FILTERS = [
   { name: 'expectedTo', label: 'Previsão até' },
 ] as const;
 
-export function OsFilters({ options, variant = 'full' }: Props) {
+export function OsFilters({ options, variant = 'full', showKind = false }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -36,6 +47,7 @@ export function OsFilters({ options, variant = 'full' }: Props) {
   const activeCount = [
     'q',
     'status',
+    'tipo',
     'institutionId',
     'responsibleId',
     'plantId',
@@ -63,7 +75,7 @@ export function OsFilters({ options, variant = 'full' }: Props) {
 
   return (
     <form onSubmit={apply} className="card p-3 sm:p-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className={`grid gap-3 md:grid-cols-2 ${showKind ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
         <div className="md:col-span-2 xl:col-span-1">
           <label htmlFor="q" className="field-label">
             Buscar
@@ -73,10 +85,26 @@ export function OsFilters({ options, variant = 'full' }: Props) {
             name="q"
             type="search"
             defaultValue={current('q')}
-            placeholder="Nº, título, instituição…"
+            placeholder="Nº, título, cliente…"
             className="field-input"
           />
         </div>
+
+        {showKind ? (
+          <div>
+            <label htmlFor="tipo" className="field-label">
+              Tipo
+            </label>
+            <select id="tipo" name="tipo" defaultValue={current('tipo')} className="field-input">
+              <option value="">OS e chamados</option>
+              {RECORD_KINDS.map((kind) => (
+                <option key={kind} value={kind}>
+                  {KIND_LABEL[kind]}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
 
         <div>
           <label htmlFor="status" className="field-label">
@@ -94,7 +122,7 @@ export function OsFilters({ options, variant = 'full' }: Props) {
 
         <div>
           <label htmlFor="institutionId" className="field-label">
-            Instituição
+            Cliente/Instituição
           </label>
           <select
             id="institutionId"

@@ -34,12 +34,15 @@ model User {
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
   updatedAt          DateTime @updatedAt @db.Timestamptz(3)
 
-  sessions           Session[]
-  responsible        Responsible?
-  createdOrders      ServiceOrder[]      @relation("ServiceOrderCreatedBy")
-  updatedOrders      ServiceOrder[]      @relation("ServiceOrderUpdatedBy")
-  serviceOrderEvents ServiceOrderEvent[]
-  settingUpdates     Setting[]
+  sessions            Session[]
+  responsible         Responsible?
+  createdOrders       ServiceOrder[]       @relation("ServiceOrderCreatedBy")
+  updatedOrders       ServiceOrder[]       @relation("ServiceOrderUpdatedBy")
+  serviceOrderEvents  ServiceOrderEvent[]
+  createdTickets      UtilityTicket[]      @relation("UtilityTicketCreatedBy")
+  updatedTickets      UtilityTicket[]      @relation("UtilityTicketUpdatedBy")
+  utilityTicketEvents UtilityTicketEvent[]
+  settingUpdates      Setting[]
 
   @@index([role, active])
 }
@@ -64,7 +67,8 @@ model Institution {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  serviceOrders ServiceOrder[]
+  serviceOrders  ServiceOrder[]
+  utilityTickets UtilityTicket[]
 
   @@index([active, name])
 }
@@ -78,8 +82,10 @@ model Responsible {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
-  serviceOrders ServiceOrder[]
+  user           User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  serviceOrders  ServiceOrder[]
+  technicianOf   ServiceOrderTechnician[]
+  utilityTickets UtilityTicket[]
 
   @@index([active, name])
 }
@@ -92,7 +98,8 @@ model Plant {
   createdAt DateTime @default(now()) @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @db.Timestamptz(3)
 
-  serviceOrders ServiceOrder[]
+  serviceOrders  ServiceOrder[]
+  utilityTickets UtilityTicket[]
 
   @@index([active, name])
 }
@@ -125,6 +132,9 @@ model ServiceOrder {
   status   String   @default("ABERTA")
   openedAt DateTime @default(now()) @db.Timestamptz(3)
 
+  /// Motivo obrigatorio ao cancelar. Zerado se a OS for reaberta.
+  cancellationReasonId String?
+
   // --- Custos do atendimento (snapshot historico: os valores unitarios usados
   // no momento do calculo ficam gravados na propria OS) ---
   technicianCount          Int
@@ -147,13 +157,15 @@ model ServiceOrder {
   createdAt   DateTime @default(now()) @db.Timestamptz(3)
   updatedAt   DateTime @updatedAt @db.Timestamptz(3)
 
-  plant       Plant       @relation(fields: [plantId], references: [id])
-  institution Institution @relation(fields: [institutionId], references: [id])
-  responsible Responsible @relation(fields: [responsibleId], references: [id])
-  createdBy   User        @relation("ServiceOrderCreatedBy", fields: [createdById], references: [id])
-  updatedBy   User?       @relation("ServiceOrderUpdatedBy", fields: [updatedById], references: [id])
+  plant              Plant               @relation(fields: [plantId], references: [id])
+  institution        Institution         @relation(fields: [institutionId], references: [id])
+  responsible        Responsible         @relation(fields: [responsibleId], references: [id])
+  cancellationReason CancellationReason? @relation(fields: [cancellationReasonId], references: [id])
+  createdBy          User                @relation("ServiceOrderCreatedBy", fields: [createdById], references: [id])
+  updatedBy          User?               @relation("ServiceOrderUpdatedBy", fields: [updatedById], references: [id])
 
-  events ServiceOrderEvent[]
+  events      ServiceOrderEvent[]
+  technicians ServiceOrderTechnician[]
 
   @@index([status])
   @@index([openedAt])
@@ -163,6 +175,27 @@ model ServiceOrder {
   @@index([plantId])
   @@index([status, expectedDate])
   @@index([createdById])
+  @@index([cancellationReasonId])
+}
+
+/// Tecnicos que executam o atendimento. Sao pessoas diferentes do responsavel
+/// pela OS: o responsavel responde pela ordem, os tecnicos vao a campo.
+/// A quantidade acompanha `ServiceOrder.technicianCount`.
+model ServiceOrderTechnician {
+  id             String  @id @default(cuid())
+  serviceOrderId String
+  /// Posicao 1..N, estavel entre edicoes.
+  position       Int
+  /// Nome do tecnico. Quando vinculado a um cadastro, e o nome dele.
+  name           String
+  /// Vinculo opcional com um responsavel cadastrado.
+  responsibleId  String?
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  responsible  Responsible? @relation(fields: [responsibleId], references: [id], onDelete: SetNull)
+
+  @@unique([serviceOrderId, position])
+  @@index([responsibleId])
 }
 
 model ServiceOrderEvent {
@@ -193,4 +226,100 @@ model Setting {
   updatedById String?
 
   updatedBy User? @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Motivos de cancelamento oferecidos ao encerrar uma OS ou um chamado da
+/// concessionaria. Ficam no banco (nunca hardcoded no frontend) para que um
+/// administrador possa acrescentar novas opcoes sem alteracao de codigo.
+model CancellationReason {
+  id        String   @id @default(cuid())
+  label     String   @unique
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  serviceOrders  ServiceOrder[]
+  utilityTickets UtilityTicket[]
+
+  @@index([active, label])
+}
+
+/// Contador transacional dos chamados da concessionaria. Separado do contador
+/// das OS: numerar os dois na mesma sequencia deixaria buracos em ambas.
+model TicketSequence {
+  /// Dia no fuso de negocio, formato AAAAMMDD.
+  day     String @id
+  lastSeq Int    @default(0)
+}
+
+/// Chamado aberto JUNTO A CONCESSIONARIA de energia (ex.: queda de energia na
+/// rede da distribuidora). Acompanha o mesmo fluxo de status das OS e aparece
+/// no mesmo Kanban, com identidade visual propria.
+model UtilityTicket {
+  id     String @id @default(cuid())
+  /// Formato CHAAAAMMDDNNN. Unico globalmente.
+  number String @unique
+
+  title              String
+  plantId            String
+  institutionId      String
+  responsibleId      String
+  /// Previsao de solucao informada pela concessionaria, em centesimos de hora
+  /// (3,5 h => 350).
+  expectedHoursCenti Int
+  /// Prazo = openedAt + previsao. Derivado, gravado para poder ser indexado.
+  dueAt              DateTime @db.Timestamptz(3)
+  /// Protocolo fornecido pela concessionaria.
+  protocol           String
+  /// Sempre persistida em CAIXA ALTA.
+  description        String
+
+  /// Mesmos valores de ServiceOrder.status.
+  status   String   @default("ABERTA")
+  openedAt DateTime @default(now()) @db.Timestamptz(3)
+
+  /// Motivo obrigatorio ao cancelar. Zerado se o chamado for reaberto.
+  cancellationReasonId String?
+
+  createdById String
+  updatedById String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  plant              Plant               @relation(fields: [plantId], references: [id])
+  institution        Institution         @relation(fields: [institutionId], references: [id])
+  responsible        Responsible         @relation(fields: [responsibleId], references: [id])
+  cancellationReason CancellationReason? @relation(fields: [cancellationReasonId], references: [id])
+  createdBy          User                @relation("UtilityTicketCreatedBy", fields: [createdById], references: [id])
+  updatedBy          User?               @relation("UtilityTicketUpdatedBy", fields: [updatedById], references: [id])
+
+  events UtilityTicketEvent[]
+
+  @@index([status])
+  @@index([openedAt])
+  @@index([dueAt])
+  @@index([institutionId])
+  @@index([responsibleId])
+  @@index([plantId])
+  @@index([status, dueAt])
+  @@index([createdById])
+  @@index([cancellationReasonId])
+}
+
+model UtilityTicketEvent {
+  id              String   @id @default(cuid())
+  utilityTicketId String
+  /// "CRIADO" | "STATUS_ALTERADO" | "RESPONSAVEL_ALTERADO" | "PREVISAO_ALTERADA"
+  /// | "INFORMACOES_EDITADAS"
+  type            String
+  message         String
+  /// JSON serializado com os campos alterados (apenas dados de negocio).
+  details         String?
+  userId          String?
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+
+  utilityTicket UtilityTicket @relation(fields: [utilityTicketId], references: [id], onDelete: Cascade)
+  user          User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([utilityTicketId, createdAt])
 }

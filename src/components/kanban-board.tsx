@@ -4,26 +4,29 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useTransition } from 'react';
 import { api, ApiError } from '@/lib/api-client';
-import { OS_STATUSES, STATUS_LABEL, type OsStatus } from '@/lib/os/status';
-
-export type KanbanCard = {
-  id: string;
-  number: string;
-  title: string;
-  status: OsStatus;
-  institution: string;
-  plant: string;
-  responsible: string;
-  expectedDate: string;
-  overdue: boolean;
-};
+import {
+  isTerminal,
+  OS_STATUSES,
+  requiresCancellationReason,
+  requiresReopenReason,
+  STATUS_LABEL,
+  type OsStatus,
+} from '@/lib/os/status';
+import type { BoardCard } from '@/lib/board';
+import type { CancellationReasonOption } from '@/lib/os/cancellation';
+import {
+  StatusReasonDialog,
+  type StatusReasonPayload,
+} from './status-reason-dialog';
 
 type Props = {
-  cards: KanbanCard[];
+  cards: BoardCard[];
   /** Total por status considerando todos os registros filtrados. */
   totals: Record<string, number>;
   /** Indica que a listagem foi truncada por limite de carga. */
   truncated: boolean;
+  isAdmin: boolean;
+  reasons: CancellationReasonOption[];
 };
 
 const COLUMN_ACCENT: Record<OsStatus, string> = {
@@ -34,43 +37,82 @@ const COLUMN_ACCENT: Record<OsStatus, string> = {
   CANCELADA: 'bg-gray-400',
 };
 
-export function KanbanBoard({ cards, totals, truncated }: Props) {
+/**
+ * Chamado da concessionaria em azul claro: no mesmo quadro das OS, mas
+ * reconhecivel de relance, sem depender de ler o numero.
+ */
+const CARD_TONE: Record<BoardCard['kind'], string> = {
+  OS: 'bg-white',
+  CHAMADO: 'border-sky-300 bg-sky-50',
+};
+
+const KIND_LABEL: Record<BoardCard['kind'], string> = {
+  OS: 'OS',
+  CHAMADO: 'Concessionária',
+};
+
+function statusEndpoint(card: BoardCard): string {
+  return card.kind === 'OS' ? `/api/os/${card.id}/status` : `/api/chamados/${card.id}/status`;
+}
+
+export function KanbanBoard({ cards, totals, truncated, isAdmin, reasons }: Props) {
   const router = useRouter();
   const [items, setItems] = useState(cards);
   const [dragging, setDragging] = useState<string | null>(null);
   const [hovered, setHovered] = useState<OsStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState<{ card: BoardCard; to: OsStatus } | null>(null);
   const [, startTransition] = useTransition();
 
   // Mantem o quadro sincronizado quando o servidor devolve novos dados.
   useEffect(() => setItems(cards), [cards]);
 
-  async function move(id: string, status: OsStatus) {
-    const card = items.find((item) => item.id === id);
-    if (!card || card.status === status) return;
-
+  async function move(card: BoardCard, status: OsStatus, payload: StatusReasonPayload = {}) {
     const previous = items;
     setError(null);
-    setBusy(id);
+    setBusy(card.id);
     // Atualizacao otimista: o card muda de coluna imediatamente.
     setItems((current) =>
-      current.map((item) => (item.id === id ? { ...item, status } : item)),
+      current.map((item) => (item.id === card.id ? { ...item, status } : item)),
     );
 
     try {
-      await api.patch(`/api/os/${id}/status`, { status });
+      await api.patch(statusEndpoint(card), { status, ...payload });
+      setPending(null);
       startTransition(() => router.refresh());
     } catch (caught) {
       setItems(previous);
       setError(
-        caught instanceof ApiError
-          ? caught.message
-          : 'Não foi possível mover a Ordem de Serviço.',
+        caught instanceof ApiError ? caught.message : 'Não foi possível mover o registro.',
       );
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * Cancelar exige motivo e retroceder exige justificativa: nesses casos o
+   * movimento passa pelo dialogo antes de ir ao servidor.
+   */
+  function start(id: string, status: OsStatus) {
+    const card = items.find((item) => item.id === id);
+    if (!card || card.status === status) return;
+
+    if (isTerminal(card.status) && !isAdmin) {
+      setError(
+        `Somente um administrador pode retroceder um registro ${STATUS_LABEL[
+          card.status
+        ].toLocaleLowerCase('pt-BR')}.`,
+      );
+      return;
+    }
+    if (requiresCancellationReason(status) || requiresReopenReason(card.status)) {
+      setError(null);
+      setPending({ card, to: status });
+      return;
+    }
+    void move(card, status);
   }
 
   return (
@@ -82,8 +124,8 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
       ) : null}
       {truncated ? (
         <p className="mb-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
-          Exibindo as Ordens de Serviço mais próximas da previsão. Use os filtros ou a listagem
-          completa para ver as demais.
+          Exibindo os registros mais próximos do prazo. Use os filtros ou as listagens completas
+          para ver os demais.
         </p>
       ) : null}
 
@@ -106,7 +148,7 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
                 setHovered(null);
                 const id = event.dataTransfer.getData('text/plain') || dragging;
                 setDragging(null);
-                if (id) void move(id, status);
+                if (id) start(id, status);
               }}
               className={`flex min-h-[7rem] flex-col rounded-lg border bg-white/60 transition-colors ${
                 isTarget ? 'border-accent-600 bg-brand-50' : 'border-line'
@@ -122,12 +164,12 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
 
               <ul className="flex flex-1 flex-col gap-2 p-2">
                 {columnCards.length === 0 ? (
-                  <li className="px-2 py-6 text-center text-xs text-ink-500">Nenhuma OS</li>
+                  <li className="px-2 py-6 text-center text-xs text-ink-500">Nenhum registro</li>
                 ) : null}
 
                 {columnCards.map((card) => (
                   <li
-                    key={card.id}
+                    key={`${card.kind}-${card.id}`}
                     draggable
                     onDragStart={(event) => {
                       event.dataTransfer.setData('text/plain', card.id);
@@ -138,19 +180,32 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
                       setDragging(null);
                       setHovered(null);
                     }}
-                    className={`card cursor-grab p-3 active:cursor-grabbing ${
+                    className={`card cursor-grab p-3 active:cursor-grabbing ${CARD_TONE[card.kind]} ${
                       busy === card.id ? 'opacity-60' : ''
                     } ${card.overdue ? 'border-l-4 border-l-red-500' : ''}`}
                   >
-                    <Link href={`/os/${card.id}`} className="block">
+                    <Link href={card.href} className="block">
                       <div className="flex items-start justify-between gap-2">
-                        <span className="font-mono text-xs font-bold text-brand-600">
+                        <span
+                          className={`font-mono text-xs font-bold ${
+                            card.kind === 'CHAMADO' ? 'text-sky-800' : 'text-brand-600'
+                          }`}
+                        >
                           Nº {card.number}
                         </span>
                         {card.overdue ? (
-                          <span className="badge bg-red-50 text-red-700 ring-red-200">Atrasada</span>
+                          <span className="badge bg-red-50 text-red-700 ring-red-200">Atrasado</span>
                         ) : null}
                       </div>
+                      <span
+                        className={`badge mt-1 ${
+                          card.kind === 'CHAMADO'
+                            ? 'bg-sky-100 text-sky-800 ring-sky-300'
+                            : 'bg-brand-50 text-brand-700 ring-brand-200'
+                        }`}
+                      >
+                        {KIND_LABEL[card.kind]}
+                      </span>
                       <p className="mt-1 line-clamp-2 text-sm font-semibold text-ink-900">
                         {card.title}
                       </p>
@@ -158,7 +213,7 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
                           crescem alem do card em vez de truncar. */}
                       <dl className="mt-2 grid min-w-0 gap-0.5 text-xs text-ink-500">
                         <div className="flex min-w-0 gap-1">
-                          <dt className="sr-only">Instituição</dt>
+                          <dt className="sr-only">Cliente/Instituição</dt>
                           <dd className="shrink-0 font-medium text-ink-700">{card.institution}</dd>
                           <span aria-hidden>·</span>
                           <dt className="sr-only">Usina</dt>
@@ -168,21 +223,34 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
                           <dt className="sr-only">Responsável</dt>
                           <dd className="truncate">{card.responsible}</dd>
                         </div>
+                        {card.extra ? (
+                          <div className="min-w-0">
+                            <dt className="sr-only">Protocolo</dt>
+                            <dd className="truncate">{card.extra}</dd>
+                          </div>
+                        ) : null}
                         <div className={card.overdue ? 'font-semibold text-red-600' : ''}>
-                          <dt className="sr-only">Previsão de execução</dt>
-                          <dd>Previsão: {card.expectedDate}</dd>
+                          <dt className="sr-only">{card.deadlineTerm}</dt>
+                          <dd>
+                            {card.deadlineTerm}: {card.deadlineLabel}
+                          </dd>
                         </div>
                       </dl>
                     </Link>
 
                     {/* Alternativa acessivel ao arrastar: funciona em toque e teclado. */}
                     <label className="mt-2 block">
-                      <span className="sr-only">Mover OS {card.number} para</span>
+                      <span className="sr-only">Mover {card.number} para</span>
                       <select
                         value={card.status}
-                        disabled={busy === card.id}
-                        onChange={(event) => void move(card.id, event.target.value as OsStatus)}
-                        className="w-full rounded border border-line bg-white px-2 py-1 text-xs text-ink-700"
+                        disabled={busy === card.id || (isTerminal(card.status) && !isAdmin)}
+                        title={
+                          isTerminal(card.status) && !isAdmin
+                            ? 'Somente administradores podem retroceder um registro encerrado.'
+                            : undefined
+                        }
+                        onChange={(event) => start(card.id, event.target.value as OsStatus)}
+                        className="w-full rounded border border-line bg-white px-2 py-1 text-xs text-ink-700 disabled:bg-gray-50 disabled:text-gray-500"
                       >
                         {OS_STATUSES.map((option) => (
                           <option key={option} value={option}>
@@ -198,6 +266,20 @@ export function KanbanBoard({ cards, totals, truncated }: Props) {
           );
         })}
       </div>
+
+      {pending ? (
+        <StatusReasonDialog
+          mode={requiresReopenReason(pending.card.status) ? 'RETROCEDER' : 'CANCELAR'}
+          recordLabel={`${KIND_LABEL[pending.card.kind]} ${pending.card.number}`}
+          from={pending.card.status}
+          to={pending.to}
+          reasons={reasons}
+          busy={busy !== null}
+          error={error}
+          onClose={() => setPending(null)}
+          onConfirm={(payload) => void move(pending.card, pending.to, payload)}
+        />
+      ) : null}
     </section>
   );
 }

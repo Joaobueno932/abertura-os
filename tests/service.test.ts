@@ -6,22 +6,30 @@ import {
   deleteServiceOrder,
   getServiceOrderEvents,
   listServiceOrders,
-  loadKanban,
   updateServiceOrder,
 } from '@/lib/os/service';
+import { loadBoard } from '@/lib/board';
 import { createOsSchema, osFiltersSchema, updateOsSchema } from '@/lib/validation/os';
 import { loadFormOptions } from '@/lib/os/options';
 import { updateRates } from '@/lib/settings';
 import { AppError } from '@/lib/http';
-import { createUser, osPayload, resetDatabase, seedCatalog, seedRates } from './helpers';
+import {
+  createUser,
+  osPayload,
+  resetDatabase,
+  seedCancellationReason,
+  seedCatalog,
+  seedRates,
+} from './helpers';
 
 async function setup() {
   await resetDatabase();
   await seedRates();
   const catalog = await seedCatalog();
+  const reason = await seedCancellationReason();
   const actor = await createUser({ role: 'USER' });
   const admin = await createUser({ role: 'ADMIN' });
-  return { catalog, actor, admin };
+  return { catalog, reason, actor, admin };
 }
 
 describe('abertura de OS', () => {
@@ -78,11 +86,11 @@ describe('abertura de OS', () => {
 });
 
 describe('cadastros inativos', () => {
-  it('nao permite abrir OS com instituicao inativa', async () => {
+  it('nao permite abrir OS com cliente/instituicao inativo', async () => {
     const { catalog, actor } = await setup();
     await prisma.institution.update({ where: { id: catalog.institution.id }, data: { active: false } });
     const input = createOsSchema.parse(osPayload(catalog));
-    await expect(createServiceOrder(input, actor)).rejects.toThrow(/inativa/i);
+    await expect(createServiceOrder(input, actor)).rejects.toThrow(/inativo/i);
   });
 
   it('nao permite abrir OS com responsavel inativo', async () => {
@@ -195,6 +203,72 @@ describe('integridade historica dos valores', () => {
   });
 });
 
+describe('tecnicos do atendimento', () => {
+  it('grava um tecnico por vaga, na ordem informada', async () => {
+    const { catalog, actor } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    expect(order.technicians.map((technician) => technician.name)).toEqual([
+      'Tecnico Um',
+      'Tecnico Dois',
+    ]);
+    expect(order.technicians.map((technician) => technician.position)).toEqual([1, 2]);
+  });
+
+  it('o nome de um tecnico vinculado vem do cadastro, nao do cliente', async () => {
+    const { catalog, actor } = await setup();
+    const input = createOsSchema.parse(
+      osPayload(catalog, {
+        technicianCount: '1',
+        technicians: [{ responsibleId: catalog.responsible.id, name: 'nome forjado' }],
+      }),
+    );
+    const order = await createServiceOrder(input, actor);
+
+    expect(order.technicians).toHaveLength(1);
+    expect(order.technicians[0]?.name).toBe(catalog.responsible.name);
+    expect(order.technicians[0]?.responsibleId).toBe(catalog.responsible.id);
+  });
+
+  it('recusa lista de tecnicos diferente da quantidade cobrada', async () => {
+    const { catalog } = await setup();
+    expect(() =>
+      createOsSchema.parse(
+        osPayload(catalog, { technicianCount: '3', technicians: [{ name: 'Tecnico Um' }] }),
+      ),
+    ).toThrow();
+    expect(() =>
+      createOsSchema.parse(
+        osPayload(catalog, { technicianCount: '1', technicians: [{ name: '' }] }),
+      ),
+    ).toThrow();
+  });
+
+  it('a edicao substitui a lista e registra a alteracao no historico', async () => {
+    const { catalog, actor } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    const updated = await updateServiceOrder(
+      order.id,
+      updateOsSchema.parse(
+        osPayload(catalog, {
+          technicianCount: '1',
+          technicians: [{ name: 'Tecnico Tres' }],
+        }),
+      ),
+      actor,
+    );
+
+    expect(updated.technicians.map((technician) => technician.name)).toEqual(['Tecnico Tres']);
+    expect(
+      await prisma.serviceOrderTechnician.count({ where: { serviceOrderId: order.id } }),
+    ).toBe(1);
+
+    const events = await getServiceOrderEvents(order.id);
+    expect(events.some((event) => event.details?.includes('Tecnico Tres'))).toBe(true);
+  });
+});
+
 describe('movimentacao de status', () => {
   it('percorre o fluxo e registra cada mudanca', async () => {
     const { catalog, actor } = await setup();
@@ -235,7 +309,7 @@ describe('movimentacao de status', () => {
     await expect(changeServiceOrderStatus(order.id, 'ARQUIVADA', actor)).rejects.toThrow(/inválido/i);
   });
 
-  it('somente administrador reabre uma OS encerrada', async () => {
+  it('somente administrador retrocede uma OS encerrada, e com justificativa', async () => {
     const { catalog, actor, admin } = await setup();
     const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
     await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor);
@@ -244,14 +318,62 @@ describe('movimentacao de status', () => {
       /administrador/i,
     );
 
-    const reopened = await changeServiceOrderStatus(order.id, 'ABERTA', admin);
+    // Nem o administrador retrocede sem dizer por que.
+    await expect(changeServiceOrderStatus(order.id, 'ABERTA', admin)).rejects.toMatchObject({
+      status: 400,
+    });
+
+    const reopened = await changeServiceOrderStatus(order.id, 'ABERTA', admin, {
+      reason: 'Cliente solicitou complementar o atendimento.',
+    });
     expect(reopened.status).toBe('ABERTA');
+
+    const [latest] = await getServiceOrderEvents(order.id);
+    expect(latest?.details).toContain('Cliente solicitou complementar o atendimento.');
+  });
+
+  it('cancelar exige um motivo cadastrado, gravado na OS', async () => {
+    const { catalog, reason, actor } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    await expect(changeServiceOrderStatus(order.id, 'CANCELADA', actor)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(
+      changeServiceOrderStatus(order.id, 'CANCELADA', actor, {
+        cancellationReasonId: 'motivo-que-nao-existe',
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const cancelled = await changeServiceOrderStatus(order.id, 'CANCELADA', actor, {
+      cancellationReasonId: reason.id,
+    });
+    expect(cancelled.status).toBe('CANCELADA');
+    expect(cancelled.cancellationReason?.label).toBe(reason.label);
+  });
+
+  it('reabrir limpa o motivo do cancelamento, que permanece no historico', async () => {
+    const { catalog, reason, actor, admin } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    await changeServiceOrderStatus(order.id, 'CANCELADA', actor, {
+      cancellationReasonId: reason.id,
+    });
+
+    const reopened = await changeServiceOrderStatus(order.id, 'ABERTA', admin, {
+      reason: 'Cancelamento indevido.',
+    });
+    expect(reopened.cancellationReason).toBeNull();
+
+    const events = await getServiceOrderEvents(order.id);
+    expect(events.some((event) => event.details?.includes(reason.label))).toBe(true);
   });
 
   it('usuario comum nao edita OS cancelada', async () => {
-    const { catalog, actor, admin } = await setup();
+    const { catalog, reason, actor, admin } = await setup();
     const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
-    await changeServiceOrderStatus(order.id, 'CANCELADA', actor);
+    await changeServiceOrderStatus(order.id, 'CANCELADA', actor, {
+      cancellationReasonId: reason.id,
+    });
 
     const input = updateOsSchema.parse(osPayload(catalog, { title: 'outro título' }));
     await expect(updateServiceOrder(order.id, input, actor)).rejects.toThrow(/administrador/i);
@@ -335,14 +457,28 @@ describe('busca, filtros e paginacao', () => {
     expect(page3.items).toHaveLength(1);
   });
 
-  it('o Kanban devolve os totais por status', async () => {
+  it('a listagem soma o filtro inteiro, nao apenas a pagina', async () => {
+    const { catalog, actor } = await setup();
+    await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    const page = await listServiceOrders(osFiltersSchema.parse({ pageSize: '1' }));
+    expect(page.items).toHaveLength(1);
+    expect(page.total).toBe(2);
+    // Duas OS de R$ 1.500,00 e 2 tecnicos cada.
+    expect(page.sums.totalCents).toBe(300_000);
+    expect(page.sums.technicianCount).toBe(4);
+  });
+
+  it('o quadro devolve os totais por status', async () => {
     const { catalog, actor } = await setup();
     const first = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
     await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
     await changeServiceOrderStatus(first.id, 'EM_ANDAMENTO', actor);
 
-    const board = await loadKanban(osFiltersSchema.parse({}));
-    expect(board.items).toHaveLength(2);
+    const board = await loadBoard(osFiltersSchema.parse({}));
+    expect(board.cards).toHaveLength(2);
+    expect(board.cards.every((card) => card.kind === 'OS')).toBe(true);
     expect(board.totals.ABERTA).toBe(1);
     expect(board.totals.EM_ANDAMENTO).toBe(1);
   });

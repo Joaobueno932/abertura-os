@@ -8,15 +8,34 @@ documentos da **Em Conta Ltda**, cujo papel timbrado é usado na geração.
 | Tela | Rota | Quem acessa |
 | --- | --- | --- |
 | Painel (indicadores + Kanban) | `/painel` | Todos |
-| Listagem com busca e filtros | `/os` | Todos |
+| Listagem de OS com busca e filtros | `/os` | Todos |
 | Abertura de OS | `/os/nova` | Todos |
-| Detalhes da OS | `/os/[id]` | Todos |
-| Edição da OS | `/os/[id]/editar` | Todos (OS cancelada: só administrador) |
-| Instituições / Responsáveis / Usinas / Usuários / Configurações | `/admin/...` | Administrador |
+| Detalhes / edição da OS | `/os/[id]`, `/os/[id]/editar` | Todos (OS cancelada: só administrador) |
+| Chamados da concessionária | `/chamados`, `/chamados/novo`, `/chamados/[id]` | Todos |
+| Clientes/Instituições · Usinas | `/cadastros/...` | Todos **cadastram**; alterar/excluir só administrador |
+| Responsáveis / Motivos de cancelamento / Usuários / Configurações | `/admin/...` | Administrador |
+
+**Clientes/Instituições** é o mesmo cadastro antes chamado apenas de
+"Instituições": o nome mudou porque a lista atende clientes que não são
+instituições.
 
 Toda restrição é aplicada **no servidor**. Esconder um link no frontend nunca é
 a única barreira: as rotas de API repetem a verificação com `requireUser()` /
 `requireAdmin()`.
+
+### O que o perfil "Usuário" faz nos cadastros
+
+| Cadastro | Consultar | Cadastrar | Alterar / desativar / excluir |
+| --- | --- | --- | --- |
+| Clientes/Instituições (`/api/cadastros/instituicoes`) | Usuário | **Usuário** | Administrador |
+| Usinas (`/api/cadastros/usinas`) | Usuário | **Usuário** | Administrador |
+| Motivos de cancelamento (`/api/admin/motivos-cancelamento`) | Usuário | Administrador | Administrador |
+| Responsáveis, Usuários, Configurações (`/api/admin/...`) | Administrador | Administrador | Administrador |
+
+Quem abre uma OS precisa poder incluir um cliente ou uma usina na hora, sem
+depender de um administrador — mas **não** remover nada. Por isso o `POST` e o
+`GET` dessas duas rotas usam `requireUser()`, enquanto `PATCH` e `DELETE`
+(em `/[id]`) continuam com `requireAdmin()`.
 
 ## Numeração da OS
 
@@ -61,7 +80,7 @@ A reserva do número e a criação da OS ocorrem **na mesma transação**, entã
 falha depois da reserva não deixa buracos por commit parcial nem OS sem evento
 de histórico.
 
-A validação das referências (usina, instituição, responsável) roda **antes** de
+A validação das referências (usina, cliente/instituição, responsável) roda **antes** de
 abrir a transação: são leituras puras, e mantê-las fora encurta o tempo em que a
 transação segura uma conexão do pool e o lock da linha de `OrderSequence` — o
 gargalo real sob rajada. A integridade referencial continua garantida pelas
@@ -108,7 +127,9 @@ O frontend **nunca** calcula esse número.
 ```
 
 - Qualquer status ativo pode ir para **Concluída** ou **Cancelada**.
-- **Reabrir** uma OS encerrada (Concluída/Cancelada) é ação de administrador.
+- **Retroceder** um registro encerrado (Concluída/Cancelada) é ação de
+  administrador **e exige justificativa escrita**.
+- **Cancelar** exige escolher um **motivo cadastrado**.
 - Uma OS **Cancelada** só pode ser editada por administrador.
 
 A movimentação acontece por drag-and-drop no Kanban **ou** pelo seletor em cada
@@ -117,6 +138,64 @@ o que mantém o sistema utilizável em toque e por teclado.
 
 Toda transição valida a permissão no servidor, grava `updatedById` e registra um
 evento `STATUS_ALTERADO` no histórico com data, hora e autor.
+
+### Motivo do cancelamento
+
+Cancelar abre um diálogo com um **dropdown** dos motivos cadastrados. Os três de
+fábrica, garantidos pelo seed:
+
+```
+Problema resolvido remotamente
+Não autorizado pelo cliente
+A pedido da gerência
+```
+
+Um administrador acrescenta outros em `/admin/motivos-cancelamento`, sem
+alteração de código. O motivo é gravado na própria OS
+(`ServiceOrder.cancellationReasonId`), aparece na tela de detalhes e vai para o
+histórico. Motivo é **escolha de lista, nunca texto livre**: é o que mantém os
+cancelamentos comparáveis entre si em qualquer relatório.
+
+Reabrir limpa o motivo do registro — ele deixou de valer —, mas o histórico
+guarda qual era.
+
+### Justificativa para retroceder
+
+Um usuário comum **não retrocede** uma OS Concluída ou Cancelada: o botão e o
+seletor do Kanban ficam desabilitados e a API responde 403. O administrador
+consegue, e o diálogo pede um texto (mínimo de 5 caracteres) que vai para o
+evento `STATUS_ALTERADO`, junto com data, hora e autor.
+
+Motivo de cancelamento e justificativa de reabertura chegam pela mesma rota
+(`PATCH /api/os/[id]/status`), mas **quem decide se são obrigatórios é o
+servidor**, que conhece o status atual do registro — o cliente não tem como
+pular a exigência.
+
+## Responsável e técnicos
+
+São papéis diferentes, e o sistema os separa:
+
+| Campo | Quem é | Como é preenchido |
+| --- | --- | --- |
+| **Responsável pela OS** | Quem responde pela ordem | Vem **preenchido com quem está abrindo** a OS, e continua editável |
+| **Técnicos do atendimento** | Quem vai até o local | Um campo por técnico, conforme a quantidade informada |
+
+O preenchimento automático do responsável procura, nesta ordem: o cadastro de
+`Responsible` vinculado ao usuário da sessão (`Responsible.userId`) e, se não
+houver, um responsável ativo com o mesmo nome. Sem correspondência, o campo fica
+vazio e obrigatório como antes.
+
+Mudar a **quantidade de técnicos** abre (ou fecha) um campo por técnico. Cada um
+pode ser **vinculado** a um cadastro de responsável ou ter o nome **digitado**.
+Quando há vínculo, o nome vem do cadastro: o cliente nunca dita o nome de um
+técnico vinculado.
+
+A lista precisa ter exatamente a quantidade informada — validado no servidor. A
+quantidade é a mesma que multiplica a hora técnica no cálculo do valor, então
+divergência entre as duas seria custo cobrado sem pessoa identificada.
+
+Os técnicos aparecem na tela de detalhes, no documento oficial (seção
+ATENDIMENTO) e no histórico quando a lista muda.
 
 ## Cálculo do atendimento
 
@@ -214,6 +293,49 @@ no Kanban e na listagem.
 
 Nenhuma data é gravada como texto formatado (`01/09/2026`): a formatação
 brasileira acontece na exibição, a partir do instante armazenado.
+
+## Chamados da concessionária
+
+Quando o problema é da **distribuidora** — uma queda de energia na rede, por
+exemplo —, quem liga para a concessionária abre aqui o chamado com o protocolo
+que ela fornece, para acompanhar até a solução.
+
+Não é uma OS: não tem custo, não gera documento oficial e não consome a
+numeração das OS. O que os dois compartilham é o **fluxo de status**, e é por
+isso que aparecem no mesmo Kanban.
+
+| Campo | Observação |
+| --- | --- |
+| Título | — |
+| Usina | Mesmo cadastro das OS |
+| Cliente/Instituição | Mesmo cadastro das OS |
+| Responsável | Vem preenchido com quem está abrindo |
+| Previsão em horas para solução | Prazo informado pela concessionária |
+| Protocolo | Número que a concessionária passa |
+| Descrição | Gravada em CAIXA ALTA, como na OS |
+
+### Numeração e prazo
+
+O número tem o formato `CHAAAAMMDDNNN` (`CH20260908001`) e usa um contador
+próprio (`TicketSequence`), com a **mesma reserva atômica** da numeração das OS.
+Contador separado de propósito: compartilhar a sequência deixaria buracos nas
+duas numerações.
+
+O prazo (`dueAt`) é gravado como `abertura + previsão em horas`. É redundante em
+relação à previsão, e isso é intencional: gravado, ele pode ser indexado e
+ordenado pelo banco. Passou do prazo e ainda não encerrado, o card é destacado
+como atrasado — o equivalente à previsão vencida de uma OS. Editar a previsão
+recalcula o prazo a partir da abertura original.
+
+### No Kanban
+
+O painel carrega OS e chamados juntos, nas mesmas colunas de status. Para
+distinguir de relance, o card do chamado é **azul claro** e traz a etiqueta
+"Concessionária" e o protocolo. O filtro **Tipo** (OS e chamados / Ordens de
+Serviço / Chamados da concessionária) separa os dois quando necessário.
+
+As regras de status são as mesmas: motivo cadastrado para cancelar, e
+administrador mais justificativa para retroceder.
 
 ## Documento oficial
 
@@ -316,10 +438,20 @@ inválidos: defesa contra path traversal e contra nomes quebrados no Windows.
 ### Conteúdo e nome dos arquivos
 
 O documento traz: identificação (número, status, abertura, previsão),
-atendimento (título, usina, instituição, responsável, local), descrição,
-**Custos do atendimento** com a memória de cálculo por bloco (serviço técnico e
+atendimento (título, usina, cliente/instituição, responsável pela OS, técnicos do
+atendimento, local), descrição e, **em página própria**, o **Valor do
+atendimento** com a memória de cálculo por bloco (serviço técnico e
 deslocamento), a faixa **TOTAL DO ATENDIMENTO** e a área **Aprovação do serviço**
 (nome, cargo/função, data e assinatura).
+
+### O valor em página separada
+
+A seção de valor começa sempre em uma página nova, mesmo que a OS termine no meio
+da primeira — separação visual entre o que foi feito e quanto custou. No DOCX é
+uma quebra explícita (`<w:br w:type="page"/>`); no PDF, o layout força uma página
+nova antes de desenhar o bloco (e não abre uma em branco se a página atual ainda
+estiver intocada). Os dois formatos partem da mesma lista de seções em
+`src/lib/docs/model.ts`, então não há como um deles quebrar e o outro não.
 
 ```
 OS-20260831001.pdf
@@ -359,17 +491,23 @@ negócio/apresentação.
 | --- | --- |
 | `User` | Usuários, perfil (`USER` / `ADMIN`) e `mustChangePassword` |
 | `Session` | Sessões ativas (apenas o hash do token é gravado) |
-| `Institution` | Instituições — inativação lógica |
+| `Institution` | Clientes/Instituições — inativação lógica |
 | `Responsible` | Responsáveis — inativação lógica, vínculo opcional com `User` |
 | `Plant` | Usinas — inativação lógica |
-| `OrderSequence` | Contador diário da numeração |
+| `CancellationReason` | Motivos de cancelamento (OS e chamados) |
+| `OrderSequence` | Contador diário da numeração das OS |
+| `TicketSequence` | Contador diário da numeração dos chamados |
 | `ServiceOrder` | A OS, com o snapshot dos custos |
-| `ServiceOrderEvent` | Histórico (timeline) |
+| `ServiceOrderTechnician` | Técnicos da OS (1..N, com vínculo opcional a `Responsible`) |
+| `ServiceOrderEvent` | Histórico da OS (timeline) |
+| `UtilityTicket` | Chamado da concessionária |
+| `UtilityTicketEvent` | Histórico do chamado |
 | `Setting` | Configurações administrativas (valores unitários) |
 
 ### Cadastros inativos
 
-Instituições, responsáveis e usinas nunca somem do histórico:
+Clientes/instituições, responsáveis, usinas e motivos de cancelamento nunca somem
+do histórico:
 
 - **não aparecem** para seleção em novas OS;
 - **continuam visíveis** nas OS que já os utilizavam;
@@ -407,8 +545,12 @@ resultado foi truncado.
 Eventos registrados em `ServiceOrderEvent`, com tipo, data/hora, autor e o
 detalhamento dos campos alterados (valor anterior → novo):
 
-`OS criada` · `Status alterado` · `Responsável alterado` · `Previsão alterada` ·
-`Informações editadas` · `Custos alterados` · `Documento gerado`
+`OS criada` · `Chamado aberto` · `Status alterado` · `Responsável alterado` ·
+`Previsão alterada` · `Informações editadas` · `Custos alterados` ·
+`Documento gerado`
+
+O evento de status guarda também o **motivo do cancelamento** e a
+**justificativa de reabertura**, quando existirem.
 
 Só dados de negócio já visíveis na própria OS são gravados — nenhum segredo,
 token ou credencial.
@@ -484,7 +626,8 @@ constraints, `ON DELETE`, tipos e concorrência real — e não o de outro banco
 | `tests/numbering.test.ts` | Primeira/segunda OS do dia, virada de dia às 23:59/00:01, independência do fuso do SO, 20 e 50 aberturas concorrentes, continuidade após reinício, UNIQUE |
 | `tests/text.test.ts` | Padronização de texto, caixa alta da descrição, datas, nome de arquivo |
 | `tests/service.test.ts` | Criação, edição, status, histórico, filtros, paginação, cadastros inativos, integridade histórica |
-| `tests/permissions.test.ts` | Usuário comum barrado na API administrativa, 401 sem sessão, exclusão lógica, bloqueio enquanto a troca de senha inicial está pendente |
+| `tests/permissions.test.ts` | Usuário comum barrado na API administrativa, cadastro liberado de clientes/usinas sem poder excluir, 401 sem sessão, exclusão lógica, bloqueio enquanto a troca de senha inicial está pendente |
+| `tests/tickets.test.ts` | Chamado da concessionária: numeração própria, prazo, atraso, motivo de cancelamento, retrocesso restrito, quadro unificado e busca por protocolo |
 | `tests/documents.test.ts` | DOCX/PDF gerados, template preservado byte a byte, `sectPr` intacto, valores e memória de cálculo, PDF íntegro |
 
 Os testes de concorrência abrem 20 e 50 OS simultâneas e verificam que saem

@@ -105,6 +105,16 @@ class Layout {
     this.y = this.top;
   }
 
+  /**
+   * Quebra de pagina explicita. Se a pagina atual ainda esta intocada, nao abre
+   * outra em branco - a quebra ja esta satisfeita.
+   */
+  breakPage(): void {
+    if (this.y === this.top) return;
+    this.page = this.newPage();
+    this.y = this.top;
+  }
+
   gap(height: number): void {
     this.y -= height;
   }
@@ -331,7 +341,7 @@ function subHeading(layout: Layout, text: string): void {
 
 function drawCosts(layout: Layout, model: OsDocumentModel): void {
   const { costs } = model;
-  sectionHeading(layout, 'CUSTOS DO ATENDIMENTO');
+  sectionHeading(layout, 'VALOR DO ATENDIMENTO');
 
   layout.ensure(170);
   subHeading(layout, 'SERVIÇO TÉCNICO');
@@ -449,6 +459,8 @@ export async function generateOsPdf(model: OsDocumentModel): Promise<Uint8Array>
       sectionHeading(layout, section.heading);
       layout.paragraph(section.text, { size: SIZE.value, leading: SIZE.value * 1.5 });
       layout.gap(4);
+    } else if (section.kind === 'pageBreak') {
+      layout.breakPage();
     } else if (section.kind === 'costs') {
       drawCosts(layout, model);
     } else {

@@ -32,6 +32,9 @@ export default async function EditarOsPage({ params }: { params: Params }) {
       institutionId: order.institution.id,
       responsibleId: order.responsible.id,
       plantId: order.plant.id,
+      technicianIds: order.technicians
+        .map((technician) => technician.responsibleId)
+        .filter((id): id is string => Boolean(id)),
     }),
     getRates(),
   ]);
@@ -59,6 +62,10 @@ export default async function EditarOsPage({ params }: { params: Params }) {
           location: order.location,
           description: order.description,
           technicianCount: String(order.technicianCount),
+          technicians: order.technicians.map((technician) => ({
+            responsibleId: technician.responsibleId ?? '',
+            name: technician.responsibleId ? '' : technician.name,
+          })),
           hoursPerTechnician: formatCenti(order.hoursPerTechnicianCenti),
           outboundKm: formatCenti(order.outboundKmCenti),
           returnKm: formatCenti(order.returnKmCenti),

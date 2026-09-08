@@ -36,6 +36,8 @@ export type OsDocumentModel = {
   plant: string;
   institution: string;
   responsible: string;
+  /** Tecnicos que executam o atendimento, ja formatados em uma linha. */
+  technicians: string;
   expectedDate: string;
   location: string;
   description: string;
@@ -51,7 +53,7 @@ export type OsDocumentModel = {
  * as configuracoes hoje nao muda o documento de uma OS antiga.
  */
 export function buildOsDocumentModel(order: ServiceOrderDetail): OsDocumentModel {
-  const technicians = order.technicianCount;
+  const technicianCount = order.technicianCount;
   const hoursText = formatCenti(order.hoursPerTechnicianCenti);
   const hoursValue = order.hoursPerTechnicianCenti / 100;
   const hourlyRate = formatBRL(order.technicalHourlyRateCents);
@@ -79,15 +81,16 @@ export function buildOsDocumentModel(order: ServiceOrderDetail): OsDocumentModel
     plant: order.plant.name,
     institution: order.institution.name,
     responsible: order.responsible.name,
+    technicians: order.technicians.map((technician) => technician.name).join(' · '),
     expectedDate: formatDateOnlyBR(order.expectedDate),
     location: order.location,
     description: order.description,
     costs: {
-      technicianCount: String(technicians),
+      technicianCount: String(technicianCount),
       hoursPerTechnician: hoursText,
       hourlyRate,
       technicalMemo:
-        `${technicians} ${plural(technicians, 'técnico', 'técnicos')} ${TIMES} ${hourlyRate} ` +
+        `${technicianCount} ${plural(technicianCount, 'técnico', 'técnicos')} ${TIMES} ${hourlyRate} ` +
         `${TIMES} ${hoursText} ${plural(hoursValue, 'hora', 'horas')}`,
       technicalSubtotal: formatBRL(order.technicalSubtotalCents),
       outboundKm: `${outboundKm} km`,
@@ -115,6 +118,8 @@ export type DocRow = { label: string; value: string };
 export type DocSection =
   | { kind: 'fields'; heading: string; columns: 1 | 2; rows: DocRow[] }
   | { kind: 'paragraph'; heading: string; text: string }
+  /** Quebra forcada: o valor do atendimento comeca sempre em pagina propria. */
+  | { kind: 'pageBreak' }
   | { kind: 'costs' }
   | { kind: 'approval' };
 
@@ -138,12 +143,16 @@ export function documentSections(model: OsDocumentModel): DocSection[] {
       rows: [
         { label: 'Título', value: model.title },
         { label: 'Usina', value: model.plant },
-        { label: 'Instituição', value: model.institution },
-        { label: 'Responsável', value: model.responsible },
+        { label: 'Cliente/Instituição', value: model.institution },
+        { label: 'Responsável pela OS', value: model.responsible },
+        { label: 'Técnicos do atendimento', value: model.technicians },
         { label: 'Local de atendimento', value: model.location },
       ],
     },
     { kind: 'paragraph', heading: 'DESCRIÇÃO', text: model.description },
+    // O valor fica visualmente separado do restante: mesmo que a OS termine no
+    // meio da primeira pagina, esta parte comeca na pagina seguinte.
+    { kind: 'pageBreak' },
     { kind: 'costs' },
     { kind: 'approval' },
   ];

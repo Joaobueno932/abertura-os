@@ -51,3 +51,23 @@ export function canTransition(from: OsStatus, to: OsStatus): boolean {
 export function requiresAdminToTransition(from: OsStatus): boolean {
   return isTerminal(from);
 }
+
+/**
+ * Cancelar exige sempre um motivo (escolhido entre os cadastrados).
+ * Vale para OS e para chamados da concessionaria.
+ */
+export function requiresCancellationReason(to: OsStatus): boolean {
+  return to === 'CANCELADA';
+}
+
+/**
+ * Retroceder um registro encerrado (Concluida/Cancelada) exige justificativa
+ * escrita, alem do perfil de administrador exigido por
+ * requiresAdminToTransition. A justificativa vai para o historico.
+ */
+export function requiresReopenReason(from: OsStatus): boolean {
+  return isTerminal(from);
+}
+
+/** Tamanho minimo da justificativa de reabertura. */
+export const MIN_REOPEN_REASON_LENGTH = 5;

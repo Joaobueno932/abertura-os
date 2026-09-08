@@ -17,10 +17,12 @@ const { createUser, jsonRequest, osPayload, resetDatabase, seedCatalog, seedRate
   './helpers'
 );
 
-const institutions = await import('@/app/api/admin/instituicoes/route');
-const institutionById = await import('@/app/api/admin/instituicoes/[id]/route');
+const institutions = await import('@/app/api/cadastros/instituicoes/route');
+const institutionById = await import('@/app/api/cadastros/instituicoes/[id]/route');
 const responsibles = await import('@/app/api/admin/responsaveis/route');
-const plants = await import('@/app/api/admin/usinas/route');
+const plants = await import('@/app/api/cadastros/usinas/route');
+const plantById = await import('@/app/api/cadastros/usinas/[id]/route');
+const reasons = await import('@/app/api/admin/motivos-cancelamento/route');
 const users = await import('@/app/api/admin/usuarios/route');
 const settings = await import('@/app/api/admin/configuracoes/route');
 const osRoute = await import('@/app/api/os/route');
@@ -32,20 +34,28 @@ function actAs(user: Session) {
   sessionMock.current = user;
 }
 
+/** Listagens restritas a administradores. */
 const ADMIN_GET = [
-  ['instituicoes', () => institutions.GET()],
   ['responsaveis', () => responsibles.GET()],
-  ['usinas', () => plants.GET()],
   ['usuarios', () => users.GET()],
   ['configuracoes', () => settings.GET()],
 ] as const;
 
+/** Listagens abertas a qualquer usuario autenticado. */
+const SHARED_GET = [
+  ['instituicoes', () => institutions.GET()],
+  ['usinas', () => plants.GET()],
+  ['motivos de cancelamento', () => reasons.GET()],
+] as const;
+
 const ADMIN_WRITE = [
   [
-    'criar instituicao',
+    'criar motivo de cancelamento',
     () =>
-      institutions.POST(
-        jsonRequest('http://localhost/api/admin/instituicoes', 'POST', { name: 'Invasora' }),
+      reasons.POST(
+        jsonRequest('http://localhost/api/admin/motivos-cancelamento', 'POST', {
+          label: 'Motivo invasor',
+        }),
       ),
   ],
   [
@@ -54,10 +64,6 @@ const ADMIN_WRITE = [
       responsibles.POST(
         jsonRequest('http://localhost/api/admin/responsaveis', 'POST', { name: 'Invasor' }),
       ),
-  ],
-  [
-    'criar usina',
-    () => plants.POST(jsonRequest('http://localhost/api/admin/usinas', 'POST', { name: 'Invasora' })),
   ],
   [
     'criar usuario',
@@ -97,12 +103,12 @@ describe('usuario comum na API administrativa', () => {
     await expect(response.json()).resolves.toMatchObject({ code: 'FORBIDDEN' });
   });
 
-  it('nao consegue desativar uma instituicao', async () => {
+  it('nao consegue desativar nem excluir um cliente/instituicao', async () => {
     actAs(await createUser({ role: 'USER' }));
     const institution = await prisma.institution.create({ data: { name: 'FIEMS' } });
 
     const patch = await institutionById.PATCH(
-      jsonRequest(`http://localhost/api/admin/instituicoes/${institution.id}`, 'PATCH', {
+      jsonRequest(`http://localhost/api/cadastros/instituicoes/${institution.id}`, 'PATCH', {
         active: false,
       }),
       { params: Promise.resolve({ id: institution.id }) },
@@ -110,13 +116,65 @@ describe('usuario comum na API administrativa', () => {
     expect(patch.status).toBe(403);
 
     const remove = await institutionById.DELETE(
-      jsonRequest(`http://localhost/api/admin/instituicoes/${institution.id}`, 'DELETE'),
+      jsonRequest(`http://localhost/api/cadastros/instituicoes/${institution.id}`, 'DELETE'),
       { params: Promise.resolve({ id: institution.id }) },
     );
     expect(remove.status).toBe(403);
 
     const stored = await prisma.institution.findUniqueOrThrow({ where: { id: institution.id } });
     expect(stored.active).toBe(true);
+  });
+});
+
+/**
+ * Cadastrar usina e cliente/instituicao e liberado ao perfil de usuario - so
+ * cadastrar. Excluir e desativar continuam sendo do administrador.
+ */
+describe('usuario comum nos cadastros compartilhados', () => {
+  it.each(SHARED_GET)('consegue listar %s', async (_name, call) => {
+    actAs(await createUser({ role: 'USER' }));
+    const response = await call();
+    expect(response.status).toBe(200);
+  });
+
+  it('cadastra um cliente/instituicao', async () => {
+    actAs(await createUser({ role: 'USER' }));
+    const response = await institutions.POST(
+      jsonRequest('http://localhost/api/cadastros/instituicoes', 'POST', { name: 'SEMAPA' }),
+    );
+    expect(response.status).toBe(201);
+    expect(await prisma.institution.count({ where: { name: 'SEMAPA' } })).toBe(1);
+  });
+
+  it('cadastra uma usina', async () => {
+    actAs(await createUser({ role: 'USER' }));
+    const response = await plants.POST(
+      jsonRequest('http://localhost/api/cadastros/usinas', 'POST', {
+        name: 'Usina Solar Dourados',
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect(await prisma.plant.count({ where: { name: 'Usina Solar Dourados' } })).toBe(1);
+  });
+
+  it('nao consegue desativar nem excluir uma usina', async () => {
+    actAs(await createUser({ role: 'USER' }));
+    const plant = await prisma.plant.create({ data: { name: 'Usina Solar Tres Lagoas' } });
+
+    const patch = await plantById.PATCH(
+      jsonRequest(`http://localhost/api/cadastros/usinas/${plant.id}`, 'PATCH', { active: false }),
+      { params: Promise.resolve({ id: plant.id }) },
+    );
+    expect(patch.status).toBe(403);
+
+    const remove = await plantById.DELETE(
+      jsonRequest(`http://localhost/api/cadastros/usinas/${plant.id}`, 'DELETE'),
+      { params: Promise.resolve({ id: plant.id }) },
+    );
+    expect(remove.status).toBe(403);
+    expect(await prisma.plant.findUniqueOrThrow({ where: { id: plant.id } })).toMatchObject({
+      active: true,
+    });
   });
 });
 
@@ -142,7 +200,7 @@ describe('administrador', () => {
     actAs(await createUser({ role: 'ADMIN' }));
 
     const created = await institutions.POST(
-      jsonRequest('http://localhost/api/admin/instituicoes', 'POST', { name: 'FIEMS' }),
+      jsonRequest('http://localhost/api/cadastros/instituicoes', 'POST', { name: 'FIEMS' }),
     );
     expect(created.status).toBe(201);
 
@@ -154,10 +212,10 @@ describe('administrador', () => {
   it('impede nome duplicado', async () => {
     actAs(await createUser({ role: 'ADMIN' }));
     await institutions.POST(
-      jsonRequest('http://localhost/api/admin/instituicoes', 'POST', { name: 'SESI' }),
+      jsonRequest('http://localhost/api/cadastros/instituicoes', 'POST', { name: 'SESI' }),
     );
     const again = await institutions.POST(
-      jsonRequest('http://localhost/api/admin/instituicoes', 'POST', { name: 'SESI' }),
+      jsonRequest('http://localhost/api/cadastros/instituicoes', 'POST', { name: 'SESI' }),
     );
     expect(again.status).toBe(409);
   });
@@ -174,7 +232,7 @@ describe('administrador', () => {
     expect(create.status).toBe(201);
 
     const removal = await institutionById.DELETE(
-      jsonRequest(`http://localhost/api/admin/instituicoes/${catalog.institution.id}`, 'DELETE'),
+      jsonRequest(`http://localhost/api/cadastros/instituicoes/${catalog.institution.id}`, 'DELETE'),
       { params: Promise.resolve({ id: catalog.institution.id }) },
     );
     expect(removal.status).toBe(200);
@@ -221,7 +279,7 @@ describe('administrador', () => {
     const institution = await prisma.institution.create({ data: { name: 'SEMAPA' } });
 
     const removal = await institutionById.DELETE(
-      jsonRequest(`http://localhost/api/admin/instituicoes/${institution.id}`, 'DELETE'),
+      jsonRequest(`http://localhost/api/cadastros/instituicoes/${institution.id}`, 'DELETE'),
       { params: Promise.resolve({ id: institution.id }) },
     );
     await expect(removal.json()).resolves.toMatchObject({ deleted: true });

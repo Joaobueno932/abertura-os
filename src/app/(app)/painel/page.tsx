@@ -1,11 +1,13 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { loadKanban, KANBAN_LIMIT } from '@/lib/os/service';
+import { loadBoard } from '@/lib/board';
 import { loadFilterOptions } from '@/lib/os/options';
+import { loadCancellationReasons } from '@/lib/os/cancellation';
+import { getSessionUser } from '@/lib/auth/session';
+import { isAdmin } from '@/lib/auth/roles';
 import { osFiltersSchema } from '@/lib/validation/os';
-import { formatDateOnlyBR, isOverdue } from '@/lib/datetime';
-import { isTerminal, OS_STATUSES, STATUS_LABEL, type OsStatus } from '@/lib/os/status';
-import { KanbanBoard, type KanbanCard } from '@/components/kanban-board';
+import { OS_STATUSES, STATUS_LABEL, type OsStatus } from '@/lib/os/status';
+import { KanbanBoard } from '@/components/kanban-board';
 import { OsFilters } from '@/components/os-filters';
 
 export const metadata: Metadata = { title: 'Painel' };
@@ -28,41 +30,39 @@ export default async function PainelPage({ searchParams }: { searchParams: Searc
   const parsed = osFiltersSchema.safeParse(raw);
   const filters = parsed.success ? parsed.data : osFiltersSchema.parse({});
 
-  const [{ items, totals }, options] = await Promise.all([loadKanban(filters), loadFilterOptions()]);
+  const [board, options, reasons, user] = await Promise.all([
+    loadBoard(filters),
+    loadFilterOptions(),
+    loadCancellationReasons(),
+    getSessionUser(),
+  ]);
 
-  const cards: KanbanCard[] = items.map((order) => {
-    const status = order.status as OsStatus;
-    return {
-      id: order.id,
-      number: order.number,
-      title: order.title,
-      status,
-      institution: order.institution.name,
-      plant: order.plant.name,
-      responsible: order.responsible.name,
-      expectedDate: formatDateOnlyBR(order.expectedDate),
-      // Atraso so faz sentido enquanto a OS nao esta encerrada.
-      overdue: !isTerminal(status) && isOverdue(order.expectedDate),
-    };
-  });
-
-  const total = OS_STATUSES.reduce((sum, status) => sum + (totals[status] ?? 0), 0);
-  const overdueCount = cards.filter((card) => card.overdue).length;
+  const total = OS_STATUSES.reduce((sum, status) => sum + (board.totals[status] ?? 0), 0);
+  const overdueCount = board.cards.filter((card) => card.overdue).length;
+  const admin = isAdmin(user?.role ?? 'USER');
 
   return (
     <div className="grid gap-5">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-ink-900">Painel de Ordens de Serviço</h1>
+          <h1 className="text-xl font-bold text-ink-900">Painel de acompanhamento</h1>
           <p className="text-sm text-ink-500">
             {total === 0
-              ? 'Nenhuma Ordem de Serviço registrada ainda.'
-              : `${total} ${total === 1 ? 'Ordem de Serviço' : 'Ordens de Serviço'} no filtro atual.`}
+              ? 'Nenhum registro no filtro atual.'
+              : `${board.byKind.OS} ${board.byKind.OS === 1 ? 'Ordem de Serviço' : 'Ordens de Serviço'} · ` +
+                `${board.byKind.CHAMADO} ${
+                  board.byKind.CHAMADO === 1 ? 'chamado' : 'chamados'
+                } da concessionária.`}
           </p>
         </div>
-        <Link href="/os/nova" className="btn-primary no-print">
-          Abrir nova OS
-        </Link>
+        <div className="no-print flex flex-wrap gap-2">
+          <Link href="/os/nova" className="btn-primary">
+            Abrir nova OS
+          </Link>
+          <Link href="/chamados/novo" className="btn-secondary">
+            Abrir chamado da concessionária
+          </Link>
+        </div>
       </header>
 
       <section aria-label="Indicadores" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -71,30 +71,41 @@ export default async function PainelPage({ searchParams }: { searchParams: Searc
             <p className="text-xs font-semibold tracking-wide text-ink-500 uppercase">
               {STATUS_LABEL[status]}
             </p>
-            <p className="mt-1 text-2xl font-bold text-ink-900">{totals[status] ?? 0}</p>
+            <p className="mt-1 text-2xl font-bold text-ink-900">{board.totals[status] ?? 0}</p>
           </div>
         ))}
         <div className="card border-l-4 border-l-red-500 p-4">
-          <p className="text-xs font-semibold tracking-wide text-ink-500 uppercase">Atrasadas</p>
+          <p className="text-xs font-semibold tracking-wide text-ink-500 uppercase">Atrasados</p>
           <p className="mt-1 text-2xl font-bold text-ink-900">{overdueCount}</p>
         </div>
       </section>
 
-      <OsFilters options={options} variant="compact" />
+      <OsFilters options={options} variant="compact" showKind />
 
       {total === 0 ? (
         <div className="card grid place-items-center gap-2 px-6 py-14 text-center">
-          <h2 className="text-base font-semibold text-ink-900">Comece abrindo a primeira OS</h2>
+          <h2 className="text-base font-semibold text-ink-900">Nada para acompanhar por aqui</h2>
           <p className="max-w-md text-sm text-ink-500">
-            Cadastre usinas e responsáveis na área administrativa e abra a primeira Ordem de
-            Serviço. Ela receberá automaticamente o número do dia.
+            Abra uma Ordem de Serviço ou registre um chamado da concessionária. Os dois aparecem
+            neste quadro, com o chamado destacado em azul claro.
           </p>
-          <Link href="/os/nova" className="btn-primary mt-2">
-            Abrir nova OS
-          </Link>
+          <div className="mt-2 flex flex-wrap justify-center gap-2">
+            <Link href="/os/nova" className="btn-primary">
+              Abrir nova OS
+            </Link>
+            <Link href="/chamados/novo" className="btn-secondary">
+              Abrir chamado
+            </Link>
+          </div>
         </div>
       ) : (
-        <KanbanBoard cards={cards} totals={totals} truncated={items.length >= KANBAN_LIMIT} />
+        <KanbanBoard
+          cards={board.cards}
+          totals={board.totals}
+          truncated={board.truncated}
+          isAdmin={admin}
+          reasons={reasons}
+        />
       )}
     </div>
   );

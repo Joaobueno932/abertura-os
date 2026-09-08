@@ -1,5 +1,6 @@
 export const EVENT_TYPES = [
   'CRIADA',
+  'CRIADO',
   'STATUS_ALTERADO',
   'RESPONSAVEL_ALTERADO',
   'PREVISAO_ALTERADA',
@@ -12,6 +13,7 @@ export type EventType = (typeof EVENT_TYPES)[number];
 
 export const EVENT_LABEL: Record<EventType, string> = {
   CRIADA: 'OS criada',
+  CRIADO: 'Chamado aberto',
   STATUS_ALTERADO: 'Status alterado',
   RESPONSAVEL_ALTERADO: 'Responsável alterado',
   PREVISAO_ALTERADA: 'Previsão alterada',

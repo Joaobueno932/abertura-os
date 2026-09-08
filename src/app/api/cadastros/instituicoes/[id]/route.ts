@@ -18,7 +18,7 @@ export const PATCH = withErrorHandling(async (request: Request, context: Context
   const input = parseOrThrow(institutionSchema.partial(), await readJson(request));
 
   const existing = await prisma.institution.findUnique({ where: { id }, select: { id: true } });
-  if (!existing) throw notFound('Instituição não encontrada.');
+  if (!existing) throw notFound('Cliente/Instituição não encontrado.');
 
   try {
     const updated = await prisma.institution.update({
@@ -31,14 +31,16 @@ export const PATCH = withErrorHandling(async (request: Request, context: Context
     });
     return NextResponse.json(updated);
   } catch (error) {
-    if (isUniqueViolation(error, 'name')) throw conflict('Já existe uma instituição com esse nome.');
+    if (isUniqueViolation(error, 'name')) throw conflict('Já existe um cliente/instituição com esse nome.');
     throw error;
   }
 });
 
 /**
- * Exclusao fisica apenas quando a instituicao nunca foi usada. Se ja estiver
- * vinculada a alguma OS, e apenas inativada, preservando o historico.
+ * Exclusao fisica apenas quando o cliente/instituicao nunca foi usado. Se ja
+ * estiver vinculado a alguma OS, e apenas inativado, preservando o historico.
+ *
+ * Restrita a administradores: um usuario comum cadastra, mas nao remove.
  */
 export const DELETE = withErrorHandling(async (request: Request, context: Context) => {
   await requireAdmin();
@@ -49,7 +51,7 @@ export const DELETE = withErrorHandling(async (request: Request, context: Contex
     where: { id },
     select: { id: true, _count: { select: { serviceOrders: true } } },
   });
-  if (!existing) throw notFound('Instituição não encontrada.');
+  if (!existing) throw notFound('Cliente/Instituição não encontrado.');
 
   if (existing._count.serviceOrders > 0) {
     const deactivated = await prisma.institution.update({

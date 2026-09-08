@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/auth/guard';
+import { requireUser } from '@/lib/auth/guard';
 import { assertSameOrigin, conflict, withErrorHandling } from '@/lib/http';
 import { parseOrThrow, readJson } from '@/lib/validation/common';
 import { institutionSchema } from '@/lib/validation/admin';
@@ -9,8 +9,16 @@ import { normalizeText } from '@/lib/text';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * Cadastro de clientes/instituicoes.
+ *
+ * Consultar e CADASTRAR sao liberados a qualquer usuario autenticado: quem abre
+ * uma OS precisa poder incluir um cliente novo sem depender de um administrador.
+ * Alterar, desativar e excluir continuam restritos a administradores - as rotas
+ * de [id] aplicam requireAdmin.
+ */
 export const GET = withErrorHandling(async () => {
-  await requireAdmin();
+  await requireUser();
   const items = await prisma.institution.findMany({
     orderBy: [{ active: 'desc' }, { name: 'asc' }],
     select: {
@@ -25,7 +33,7 @@ export const GET = withErrorHandling(async () => {
 });
 
 export const POST = withErrorHandling(async (request: Request) => {
-  await requireAdmin();
+  await requireUser();
   assertSameOrigin(request);
   const input = parseOrThrow(institutionSchema, await readJson(request));
   try {
@@ -35,7 +43,7 @@ export const POST = withErrorHandling(async (request: Request) => {
     });
     return NextResponse.json(created, { status: 201 });
   } catch (error) {
-    if (isUniqueViolation(error, 'name')) throw conflict('Já existe uma instituição com esse nome.');
+    if (isUniqueViolation(error, 'name')) throw conflict('Já existe um cliente/instituição com esse nome.');
     throw error;
   }
 });

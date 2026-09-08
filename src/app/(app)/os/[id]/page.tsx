@@ -9,7 +9,8 @@ import { formatBRL, formatCenti } from '@/lib/money';
 import { isTerminal, type OsStatus } from '@/lib/os/status';
 import { EVENT_LABEL, parseChanges, type EventType } from '@/lib/os/history';
 import { StatusBadge } from '@/components/status-badge';
-import { OsActions } from '@/components/os-actions';
+import { RecordActions } from '@/components/record-actions';
+import { loadCancellationReasons } from '@/lib/os/cancellation';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,10 @@ export default async function OsDetailPage({ params }: { params: Params }) {
   const [order, user] = await Promise.all([getServiceOrderDetail(id), getSessionUser()]);
   if (!order || !user) notFound();
 
-  const events = await getServiceOrderEvents(id);
+  const [events, reasons] = await Promise.all([
+    getServiceOrderEvents(id),
+    loadCancellationReasons(order.cancellationReason?.id),
+  ]);
   const status = order.status as OsStatus;
   const overdue = !isTerminal(status) && isOverdue(order.expectedDate);
   const admin = isAdmin(user.role);
@@ -87,6 +91,12 @@ export default async function OsDetailPage({ params }: { params: Params }) {
                 </dd>
               </div>
               <Field label="Data de abertura" value={formatDateOnlyBR(order.openedAt)} />
+              {order.cancellationReason ? (
+                <Field
+                  label="Motivo do cancelamento"
+                  value={order.cancellationReason.label}
+                />
+              ) : null}
             </dl>
           </section>
 
@@ -95,10 +105,31 @@ export default async function OsDetailPage({ params }: { params: Params }) {
             <dl className="mt-4 grid gap-4 sm:grid-cols-2">
               <Field label="Título" value={order.title} />
               <Field label="Usina" value={order.plant.name} />
-              <Field label="Instituição" value={order.institution.name} />
-              <Field label="Responsável" value={order.responsible.name} />
+              <Field label="Cliente/Instituição" value={order.institution.name} />
+              <Field label="Responsável pela OS" value={order.responsible.name} />
               <Field label="Previsão de execução" value={formatDateOnlyBR(order.expectedDate)} />
               <Field label="Local de atendimento" value={order.location} />
+              <div className="sm:col-span-2">
+                <dt className="field-label">
+                  Técnicos do atendimento ({order.technicians.length})
+                </dt>
+                <dd className="text-sm text-ink-900">
+                  {order.technicians.length === 0 ? (
+                    '—'
+                  ) : (
+                    <ul className="grid gap-0.5">
+                      {order.technicians.map((technician) => (
+                        <li key={technician.id}>
+                          {technician.position}. {technician.name}
+                          {technician.responsibleId ? (
+                            <span className="ml-1 text-xs text-ink-500">(cadastro vinculado)</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </dd>
+              </div>
             </dl>
           </section>
 
@@ -110,7 +141,7 @@ export default async function OsDetailPage({ params }: { params: Params }) {
           </section>
 
           <section className="card p-4 sm:p-5">
-            <h2 className="section-title">Custos do atendimento</h2>
+            <h2 className="section-title">Valor do atendimento</h2>
 
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-md border border-line p-4">
@@ -191,12 +222,14 @@ export default async function OsDetailPage({ params }: { params: Params }) {
           <section className="card p-4 sm:p-5">
             <h2 className="section-title">Ações</h2>
             <div className="mt-3">
-              <OsActions
-                osId={order.id}
-                osNumber={order.number}
+              <RecordActions
+                kind="OS"
+                id={order.id}
+                number={order.number}
                 status={status}
                 canEdit={canEdit}
                 isAdmin={admin}
+                reasons={reasons}
               />
             </div>
           </section>

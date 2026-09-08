@@ -47,6 +47,15 @@ export type CrudConfig = {
   fields: CrudField[];
   /** Permite excluir (com fallback automatico para inativacao quando em uso). */
   allowDelete: boolean;
+  /**
+   * Permissoes por perfil. Cadastros como usinas e clientes/instituicoes sao
+   * abertos a qualquer usuario para CRIAR, mas so administradores alteram,
+   * desativam ou excluem. Omitidos = permitido (comportamento das telas
+   * exclusivamente administrativas). O servidor repete cada checagem.
+   */
+  allowCreate?: boolean;
+  allowEdit?: boolean;
+  allowToggle?: boolean;
   emptyMessage: string;
 };
 
@@ -94,6 +103,9 @@ export function CrudManager({ config, items }: { config: CrudConfig; items: Crud
   const [busy, setBusy] = useState(false);
 
   const open = creating || editing !== null;
+  const canCreate = config.allowCreate !== false;
+  const canEdit = config.allowEdit !== false;
+  const canToggle = config.allowToggle !== false;
 
   function startCreate() {
     setEditing(null);
@@ -302,13 +314,13 @@ export function CrudManager({ config, items }: { config: CrudConfig; items: Crud
             </button>
           </div>
         </form>
-      ) : (
+      ) : canCreate ? (
         <div>
           <button type="button" className="btn-primary" onClick={startCreate}>
             {config.newLabel}
           </button>
         </div>
-      )}
+      ) : null}
 
       {items.length === 0 ? (
         <div className="card grid place-items-center gap-2 px-6 py-12 text-center">
@@ -367,22 +379,29 @@ export function CrudManager({ config, items }: { config: CrudConfig; items: Crud
                       );
                     })}
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        className="btn-ghost px-2 py-1"
-                        onClick={() => startEdit(item)}
-                        disabled={busy}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-ghost px-2 py-1"
-                        onClick={() => void toggleActive(item)}
-                        disabled={busy}
-                      >
-                        {item.active ? 'Desativar' : 'Reativar'}
-                      </button>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          className="btn-ghost px-2 py-1"
+                          onClick={() => startEdit(item)}
+                          disabled={busy}
+                        >
+                          Editar
+                        </button>
+                      ) : null}
+                      {canToggle ? (
+                        <button
+                          type="button"
+                          className="btn-ghost px-2 py-1"
+                          onClick={() => void toggleActive(item)}
+                          disabled={busy}
+                        >
+                          {item.active ? 'Desativar' : 'Reativar'}
+                        </button>
+                      ) : null}
+                      {!canEdit && !canToggle && !config.allowDelete ? (
+                        <span className="text-xs text-ink-500">Somente leitura</span>
+                      ) : null}
                       {config.allowDelete ? (
                         <button
                           type="button"

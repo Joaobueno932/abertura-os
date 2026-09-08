@@ -11,11 +11,20 @@ import { serializeChanges, type FieldChange } from './history';
 import {
   canTransition,
   isOsStatus,
+  MIN_REOPEN_REASON_LENGTH,
   requiresAdminToTransition,
+  requiresCancellationReason,
+  requiresReopenReason,
   STATUS_LABEL,
   type OsStatus,
 } from './status';
-import type { CreateOsInput, OsFilters, UpdateOsInput } from '@/lib/validation/os';
+import type {
+  ChangeStatusInput,
+  CreateOsInput,
+  OsFilters,
+  TechnicianInput,
+  UpdateOsInput,
+} from '@/lib/validation/os';
 import type { SessionUser } from '@/lib/auth/session';
 import { isAdmin } from '@/lib/auth/roles';
 
@@ -30,17 +39,23 @@ const listSelect = {
   openedAt: true,
   expectedDate: true,
   location: true,
+  technicianCount: true,
   totalCents: true,
   plant: { select: { id: true, name: true } },
   institution: { select: { id: true, name: true } },
   responsible: { select: { id: true, name: true } },
 } satisfies Prisma.ServiceOrderSelect;
 
+/** Tecnicos sempre na ordem em que foram informados no formulario. */
+const technicianSelect = {
+  select: { id: true, position: true, name: true, responsibleId: true },
+  orderBy: { position: 'asc' },
+} satisfies Prisma.ServiceOrder$techniciansArgs;
+
 /** Projecao completa da tela de detalhes e do documento. */
 const detailSelect = {
   ...listSelect,
   description: true,
-  technicianCount: true,
   hoursPerTechnicianCenti: true,
   outboundKmCenti: true,
   returnKmCenti: true,
@@ -52,6 +67,8 @@ const detailSelect = {
   updatedAt: true,
   createdBy: { select: { id: true, name: true } },
   updatedBy: { select: { id: true, name: true } },
+  technicians: technicianSelect,
+  cancellationReason: { select: { id: true, label: true } },
 } satisfies Prisma.ServiceOrderSelect;
 
 export type ServiceOrderListItem = Prisma.ServiceOrderGetPayload<{ select: typeof listSelect }>;
@@ -86,8 +103,8 @@ async function resolveReferences(
 
   if (!plant) throw badRequest('Usina inválida.', { plantId: 'Selecione uma usina válida.' });
   if (!institution) {
-    throw badRequest('Instituição inválida.', {
-      institutionId: 'Selecione uma instituição válida.',
+    throw badRequest('Cliente/Instituição inválido.', {
+      institutionId: 'Selecione um cliente/instituição válido.',
     });
   }
   if (!responsible) {
@@ -102,8 +119,8 @@ async function resolveReferences(
     });
   }
   if (!institution.active && current?.institutionId !== institution.id) {
-    throw badRequest('Instituição inativa.', {
-      institutionId: 'Esta instituição está inativa e não pode ser selecionada.',
+    throw badRequest('Cliente/Instituição inativo.', {
+      institutionId: 'Este cliente/instituição está inativo e não pode ser selecionado.',
     });
   }
   if (!responsible.active && current?.responsibleId !== responsible.id) {
@@ -113,6 +130,46 @@ async function resolveReferences(
   }
 
   return { plant, institution, responsible };
+}
+
+/**
+ * Resolve os tecnicos do atendimento.
+ *
+ * Cada tecnico e um cadastro vinculado OU um nome digitado. Quando ha vinculo,
+ * o nome vem do cadastro (o cliente nunca dita o nome de um tecnico vinculado);
+ * quando e digitado, passa pela mesma padronizacao de texto dos demais campos.
+ */
+async function resolveTechnicians(
+  tx: Client,
+  technicians: TechnicianInput[],
+): Promise<Array<{ position: number; name: string; responsibleId: string | null }>> {
+  const linkedIds = [...new Set(technicians.map((item) => item.responsibleId).filter(Boolean))];
+  const rows = linkedIds.length
+    ? await tx.responsible.findMany({
+        where: { id: { in: linkedIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const byId = new Map(rows.map((row) => [row.id, row.name]));
+
+  return technicians.map((technician, index) => {
+    const position = index + 1;
+    if (technician.responsibleId) {
+      const name = byId.get(technician.responsibleId);
+      if (!name) {
+        throw badRequest('Técnico inválido.', {
+          [`technicians.${index}.responsibleId`]: 'Selecione um técnico válido.',
+        });
+      }
+      return { position, name, responsibleId: technician.responsibleId };
+    }
+    return { position, name: normalizeText(technician.name), responsibleId: null };
+  });
+}
+
+/** Texto legivel dos tecnicos, usado no historico, na tela e no documento. */
+export function formatTechnicians(technicians: Array<{ name: string }>): string {
+  return technicians.map((technician) => technician.name).join(' · ');
 }
 
 /** Converte a entrada validada em custos recalculados no servidor. */
@@ -151,6 +208,7 @@ export async function createServiceOrder(
   // enquanto durar - sob rajada de aberturas simultaneas, isso e o gargalo.
   // A integridade referencial continua garantida pelas foreign keys.
   await resolveReferences(prisma, input);
+  const technicians = await resolveTechnicians(prisma, input.technicians);
 
   for (let attempt = 1; attempt <= MAX_NUMBER_ATTEMPTS; attempt += 1) {
     try {
@@ -179,6 +237,7 @@ export async function createServiceOrder(
             totalCents: costs.totalCents,
             createdById: actor.id,
             updatedById: actor.id,
+            technicians: { create: technicians },
           },
           select: detailSelect,
         });
@@ -205,7 +264,7 @@ export async function createServiceOrder(
 }
 
 const COST_FIELDS = ['technicianCount', 'hoursPerTechnician', 'outboundKm', 'returnKm', 'total'];
-const INFO_FIELDS = ['title', 'location', 'description', 'plant', 'institution'];
+const INFO_FIELDS = ['title', 'location', 'description', 'plant', 'institution', 'technicians'];
 
 function diffFields(
   before: ServiceOrderDetail,
@@ -217,6 +276,7 @@ function diffFields(
     plantName: string;
     institutionName: string;
     responsibleName: string;
+    technicians: string;
   },
   costs: ReturnType<typeof computeCosts>,
 ): { changes: FieldChange[]; types: Set<string> } {
@@ -236,9 +296,16 @@ function diffFields(
   push('plant', 'Usina', before.plant.name, after.plantName, 'INFORMACOES_EDITADAS');
   push(
     'institution',
-    'Instituição',
+    'Cliente/Instituição',
     before.institution.name,
     after.institutionName,
+    'INFORMACOES_EDITADAS',
+  );
+  push(
+    'technicians',
+    'Técnicos',
+    formatTechnicians(before.technicians),
+    after.technicians,
     'INFORMACOES_EDITADAS',
   );
   push(
@@ -285,7 +352,7 @@ function diffFields(
   );
   push(
     'total',
-    'Total do atendimento',
+    'Valor do atendimento',
     formatBRL(before.totalCents),
     formatBRL(costs.totalCents),
     'CUSTOS_ALTERADOS',
@@ -319,6 +386,7 @@ export async function updateServiceOrder(
       institutionId: before.institution.id,
       responsibleId: before.responsible.id,
     });
+    const technicians = await resolveTechnicians(tx, input.technicians);
 
     const { changes, types } = diffFields(
       before,
@@ -330,6 +398,7 @@ export async function updateServiceOrder(
         plantName: refs.plant.name,
         institutionName: refs.institution.name,
         responsibleName: refs.responsible.name,
+        technicians: formatTechnicians(technicians),
       },
       costs,
     );
@@ -356,6 +425,9 @@ export async function updateServiceOrder(
         travelSubtotalCents: costs.travelSubtotalCents,
         totalCents: costs.totalCents,
         updatedById: actor.id,
+        // A lista de tecnicos e substituida por inteiro: as posicoes precisam
+        // continuar sequenciais quando a quantidade muda.
+        technicians: { deleteMany: {}, create: technicians },
       },
       select: detailSelect,
     });
@@ -390,17 +462,73 @@ export async function updateServiceOrder(
   }, TX_OPTIONS);
 }
 
+/**
+ * Resolve o motivo de cancelamento informado.
+ *
+ * O motivo e obrigatorio ao cancelar e vem de um cadastro (nunca texto livre),
+ * o que mantem os relatorios comparaveis. Motivos inativos continuam validos
+ * para registros que ja os usavam - a checagem de "ativo" vale para o motivo
+ * novo, nao para o historico.
+ */
+export async function resolveCancellationReason(
+  tx: Client,
+  reasonId: string | undefined,
+  currentReasonId: string | null,
+): Promise<{ id: string; label: string }> {
+  if (!reasonId) {
+    throw badRequest('Informe o motivo do cancelamento.', {
+      cancellationReasonId: 'Selecione o motivo do cancelamento.',
+    });
+  }
+  const reason = await tx.cancellationReason.findUnique({
+    where: { id: reasonId },
+    select: { id: true, label: true, active: true },
+  });
+  if (!reason) {
+    throw badRequest('Motivo de cancelamento inválido.', {
+      cancellationReasonId: 'Selecione um motivo válido.',
+    });
+  }
+  if (!reason.active && currentReasonId !== reason.id) {
+    throw badRequest('Motivo de cancelamento inativo.', {
+      cancellationReasonId: 'Este motivo está inativo e não pode ser selecionado.',
+    });
+  }
+  return { id: reason.id, label: reason.label };
+}
+
+/** Justificativa escrita exigida para retroceder um registro encerrado. */
+export function normalizeReopenReason(reason: string | undefined): string {
+  const text = (reason ?? '').trim();
+  if (text.length < MIN_REOPEN_REASON_LENGTH) {
+    throw badRequest('Informe o motivo para reabrir o registro.', {
+      reason: `Descreva o motivo com pelo menos ${MIN_REOPEN_REASON_LENGTH} caracteres.`,
+    });
+  }
+  return text;
+}
+
+/**
+ * Movimenta o status da OS.
+ *
+ * Tres regras de negocio, todas validadas aqui (o frontend apenas as reflete):
+ *
+ * - cancelar exige um motivo cadastrado;
+ * - retroceder uma OS Concluida/Cancelada e exclusivo de administrador...
+ * - ...e exige uma justificativa escrita, que fica no historico.
+ */
 export async function changeServiceOrderStatus(
   id: string,
   nextStatus: string,
   actor: SessionUser,
+  options: Omit<ChangeStatusInput, 'status'> = {},
 ): Promise<ServiceOrderDetail> {
   if (!isOsStatus(nextStatus)) throw badRequest('Status inválido.', { status: 'Status inválido.' });
 
   return prisma.$transaction(async (tx) => {
     const current = await tx.serviceOrder.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, cancellationReasonId: true },
     });
     if (!current) throw notFound('Ordem de Serviço não encontrada.');
 
@@ -414,23 +542,51 @@ export async function changeServiceOrderStatus(
       );
     }
     if (requiresAdminToTransition(from) && !isAdmin(actor.role)) {
-      throw forbidden('Somente um administrador pode reabrir uma OS encerrada.');
+      throw forbidden(
+        'OS ' +
+          STATUS_LABEL[from].toLocaleLowerCase('pt-BR') +
+          '. Somente um administrador pode retrocedê-la.',
+      );
     }
+
+    const cancellation = requiresCancellationReason(nextStatus)
+      ? await resolveCancellationReason(tx, options.cancellationReasonId, current.cancellationReasonId)
+      : null;
+    const reopenReason = requiresReopenReason(from) ? normalizeReopenReason(options.reason) : null;
 
     const updated = await tx.serviceOrder.update({
       where: { id },
-      data: { status: nextStatus, updatedById: actor.id },
+      data: {
+        status: nextStatus,
+        updatedById: actor.id,
+        // O motivo acompanha o cancelamento: ao sair de Cancelada ele deixa de
+        // valer e e limpo, mas continua registrado no historico.
+        cancellationReasonId: cancellation ? cancellation.id : null,
+      },
       select: detailSelect,
     });
+
+    const changes: FieldChange[] = [
+      { field: 'status', label: 'Status', from: STATUS_LABEL[from], to: STATUS_LABEL[nextStatus] },
+    ];
+    if (cancellation) {
+      changes.push({
+        field: 'cancellationReason',
+        label: 'Motivo do cancelamento',
+        from: '',
+        to: cancellation.label,
+      });
+    }
+    if (reopenReason) {
+      changes.push({ field: 'reason', label: 'Motivo da reabertura', from: '', to: reopenReason });
+    }
 
     await tx.serviceOrderEvent.create({
       data: {
         serviceOrderId: id,
         type: 'STATUS_ALTERADO',
         message: STATUS_LABEL[from] + ' -> ' + STATUS_LABEL[nextStatus],
-        details: serializeChanges([
-          { field: 'status', label: 'Status', from: STATUS_LABEL[from], to: STATUS_LABEL[nextStatus] },
-        ]),
+        details: serializeChanges(changes),
         userId: actor.id,
       },
     });
@@ -563,7 +719,7 @@ export function buildOsWhere(filters: OsFilters): Prisma.ServiceOrderWhereInput 
 
 export async function listServiceOrders(filters: OsFilters) {
   const where = buildOsWhere(filters);
-  const [items, total] = await prisma.$transaction([
+  const [items, total, sums] = await prisma.$transaction([
     prisma.serviceOrder.findMany({
       where,
       select: listSelect,
@@ -572,6 +728,17 @@ export async function listServiceOrders(filters: OsFilters) {
       take: filters.pageSize,
     }),
     prisma.serviceOrder.count({ where }),
+    // Somatorio de TODAS as OS do filtro, nao apenas da pagina exibida: e o
+    // numero que interessa para fechar um periodo. O banco soma, nao a aplicacao.
+    prisma.serviceOrder.aggregate({
+      where,
+      _sum: {
+        totalCents: true,
+        technicalSubtotalCents: true,
+        travelSubtotalCents: true,
+        technicianCount: true,
+      },
+    }),
   ]);
 
   return {
@@ -580,32 +747,11 @@ export async function listServiceOrders(filters: OsFilters) {
     page: filters.page,
     pageSize: filters.pageSize,
     totalPages: Math.max(1, Math.ceil(total / filters.pageSize)),
+    sums: {
+      totalCents: sums._sum.totalCents ?? 0,
+      technicalSubtotalCents: sums._sum.technicalSubtotalCents ?? 0,
+      travelSubtotalCents: sums._sum.travelSubtotalCents ?? 0,
+      technicianCount: sums._sum.technicianCount ?? 0,
+    },
   };
-}
-
-/** Teto de cards carregados no Kanban, para nao trazer a base inteira. */
-export const KANBAN_LIMIT = 400;
-
-export async function loadKanban(filters: OsFilters) {
-  const where = buildOsWhere(filters);
-  // Leituras independentes: Promise.all evita abrir transacao para consultas
-  // que nao precisam de atomicidade entre si.
-  const [items, counts] = await Promise.all([
-    prisma.serviceOrder.findMany({
-      where,
-      select: listSelect,
-      orderBy: [{ expectedDate: 'asc' }, { number: 'asc' }],
-      take: KANBAN_LIMIT,
-    }),
-    prisma.serviceOrder.groupBy({
-      by: ['status'],
-      where,
-      orderBy: { status: 'asc' },
-      _count: { status: true },
-    }),
-  ]);
-
-  const totals: Record<string, number> = {};
-  for (const row of counts) totals[row.status] = row._count.status;
-  return { items, totals };
 }

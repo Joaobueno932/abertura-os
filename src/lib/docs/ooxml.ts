@@ -160,6 +160,14 @@ export function table(rows: string, columnWidths: number[]): string {
   );
 }
 
+/**
+ * Quebra de pagina explicita. Usada para isolar o bloco de valor do
+ * atendimento, que sempre comeca em uma pagina nova.
+ */
+export function pageBreak(): string {
+  return '<w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr><w:r><w:br w:type="page"/></w:r></w:p>';
+}
+
 /** Paragrafo vazio usado como espacador vertical. */
 export function spacer(afterTwips = 120): string {
   return paragraph(run('', { size: 4 }), { spaceAfter: afterTwips });

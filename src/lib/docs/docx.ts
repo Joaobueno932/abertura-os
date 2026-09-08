@@ -6,7 +6,7 @@ import {
   type DocRow,
   type OsDocumentModel,
 } from './model';
-import { BRAND, cell, paragraph, row, run, spacer, table } from './ooxml';
+import { BRAND, cell, pageBreak, paragraph, row, run, spacer, table } from './ooxml';
 
 /**
  * Geracao do DOCX da Ordem de Servico.
@@ -129,7 +129,7 @@ function costsBlock(model: OsDocumentModel, contentWidth: number): string {
     });
 
   return [
-    sectionHeading('CUSTOS DO ATENDIMENTO'),
+    sectionHeading('VALOR DO ATENDIMENTO'),
 
     subHeading('SERVIÇO TÉCNICO'),
     table(
@@ -249,6 +249,8 @@ export function buildDocumentBody(model: OsDocumentModel, contentWidthTwips: num
           spaceAfter: 60,
         }),
       );
+    } else if (section.kind === 'pageBreak') {
+      parts.push(pageBreak());
     } else if (section.kind === 'costs') {
       parts.push(costsBlock(model, contentWidthTwips));
     } else {

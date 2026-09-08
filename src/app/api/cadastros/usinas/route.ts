@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/auth/guard';
+import { requireUser } from '@/lib/auth/guard';
 import { assertSameOrigin, conflict, withErrorHandling } from '@/lib/http';
 import { parseOrThrow, readJson } from '@/lib/validation/common';
 import { plantSchema } from '@/lib/validation/admin';
@@ -9,8 +9,14 @@ import { normalizeText } from '@/lib/text';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+/**
+ * Cadastro de usinas.
+ *
+ * Consultar e CADASTRAR sao liberados a qualquer usuario autenticado; alterar,
+ * desativar e excluir continuam restritos a administradores (rotas de [id]).
+ */
 export const GET = withErrorHandling(async () => {
-  await requireAdmin();
+  await requireUser();
   const items = await prisma.plant.findMany({
     orderBy: [{ active: 'desc' }, { name: 'asc' }],
     select: {
@@ -26,7 +32,7 @@ export const GET = withErrorHandling(async () => {
 });
 
 export const POST = withErrorHandling(async (request: Request) => {
-  await requireAdmin();
+  await requireUser();
   assertSameOrigin(request);
   const input = parseOrThrow(plantSchema, await readJson(request));
   try {

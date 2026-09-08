@@ -12,13 +12,19 @@ type NavItem = { href: string; label: string; adminOnly?: boolean };
 const NAV: NavItem[] = [
   { href: '/painel', label: 'Painel' },
   { href: '/os', label: 'Ordens de Serviço' },
+  { href: '/chamados', label: 'Chamados' },
   { href: '/os/nova', label: 'Nova OS' },
 ];
 
+/** Cadastros que qualquer usuario pode alimentar (so administrador altera). */
+const CADASTROS_NAV: NavItem[] = [
+  { href: '/cadastros/clientes', label: 'Clientes/Instituições' },
+  { href: '/cadastros/usinas', label: 'Usinas' },
+];
+
 const ADMIN_NAV: NavItem[] = [
-  { href: '/admin/instituicoes', label: 'Instituições' },
   { href: '/admin/responsaveis', label: 'Responsáveis' },
-  { href: '/admin/usinas', label: 'Usinas' },
+  { href: '/admin/motivos-cancelamento', label: 'Motivos de cancelamento' },
   { href: '/admin/usuarios', label: 'Usuários' },
   { href: '/admin/configuracoes', label: 'Configurações' },
 ];
@@ -39,10 +45,15 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
   const [leaving, setLeaving] = useState(false);
 
   const isAdmin = user.role === 'ADMIN';
-  const items = isAdmin ? [...NAV, ...ADMIN_NAV] : NAV;
+  const items = isAdmin
+    ? [...NAV, ...CADASTROS_NAV, ...ADMIN_NAV]
+    : [...NAV, ...CADASTROS_NAV];
 
+  // "/os" e "/chamados" tem paginas filhas com item proprio no menu: sem a
+  // comparacao exata, dois itens ficariam marcados como atuais ao mesmo tempo.
+  const EXACT_ONLY = ['/os', '/chamados'];
   const isActive = (href: string) =>
-    href === '/os' ? pathname === '/os' : pathname === href || pathname.startsWith(`${href}/`);
+    EXACT_ONLY.includes(href) ? pathname === href : pathname === href || pathname.startsWith(`${href}/`);
 
   async function logout() {
     setLeaving(true);
@@ -68,7 +79,7 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
             </span>
           </Link>
 
-          <nav className="ml-4 hidden flex-1 items-center gap-1 lg:flex" aria-label="Principal">
+          <nav className="ml-4 hidden flex-1 flex-wrap items-center gap-1 lg:flex" aria-label="Principal">
             {items.map((item) => (
               <Link
                 key={item.href}

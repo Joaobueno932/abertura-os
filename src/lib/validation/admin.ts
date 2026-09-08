@@ -4,7 +4,13 @@ import { ROLES } from '@/lib/auth/roles';
 import { decimalCenti } from './common';
 
 export const institutionSchema = z.object({
-  name: requiredText('Nome da instituicao', 120, 2),
+  name: requiredText('Nome do cliente/instituicao', 120, 2),
+  active: z.boolean().optional().default(true),
+});
+
+/** Motivos oferecidos ao cancelar uma OS ou um chamado da concessionaria. */
+export const cancellationReasonSchema = z.object({
+  label: requiredText('Motivo', 120, 3),
   active: z.boolean().optional().default(true),
 });
 

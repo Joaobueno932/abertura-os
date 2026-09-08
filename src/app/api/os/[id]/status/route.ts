@@ -13,11 +13,14 @@ type Context = { params: Promise<{ id: string }> };
 /**
  * Movimentacao de status (Kanban ou menu de acoes). A transicao e validada no
  * servidor, registra data/hora e o usuario responsavel pela alteracao.
+ *
+ * O motivo do cancelamento e a justificativa de reabertura chegam aqui, mas
+ * quem decide se sao obrigatorios e o servico, que conhece o status atual.
  */
 export const PATCH = withErrorHandling(async (request: Request, context: Context) => {
   const actor = await requireUser();
   assertSameOrigin(request);
   const { id } = await context.params;
-  const { status } = parseOrThrow(changeStatusSchema, await readJson(request));
-  return NextResponse.json(await changeServiceOrderStatus(id, status, actor));
+  const { status, ...options } = parseOrThrow(changeStatusSchema, await readJson(request));
+  return NextResponse.json(await changeServiceOrderStatus(id, status, actor, options));
 });

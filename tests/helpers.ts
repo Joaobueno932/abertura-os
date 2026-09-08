@@ -1,13 +1,19 @@
 import { prisma } from '@/lib/prisma';
 import { hashPassword } from '@/lib/auth/password';
 import { DEFAULT_RATES, SETTING_KEYS } from '@/lib/rates';
+import { DEFAULT_CANCELLATION_REASONS } from '@/lib/os/cancellation-reasons';
 import type { SessionUser } from '@/lib/auth/session';
 
 /** Limpa o banco de teste respeitando a ordem das chaves estrangeiras. */
 export async function resetDatabase(): Promise<void> {
   await prisma.serviceOrderEvent.deleteMany();
+  await prisma.serviceOrderTechnician.deleteMany();
   await prisma.serviceOrder.deleteMany();
+  await prisma.utilityTicketEvent.deleteMany();
+  await prisma.utilityTicket.deleteMany();
+  await prisma.cancellationReason.deleteMany();
   await prisma.orderSequence.deleteMany();
+  await prisma.ticketSequence.deleteMany();
   await prisma.responsible.deleteMany();
   await prisma.institution.deleteMany();
   await prisma.plant.deleteMany();
@@ -64,6 +70,14 @@ export async function seedCatalog() {
   return { institution, responsible, plant };
 }
 
+/** Motivo de cancelamento minimo para os testes de status. */
+export async function seedCancellationReason() {
+  return prisma.cancellationReason.create({
+    data: { label: DEFAULT_CANCELLATION_REASONS[0] },
+    select: { id: true, label: true },
+  });
+}
+
 type Catalog = Awaited<ReturnType<typeof seedCatalog>>;
 
 /** Payload do cenario obrigatorio de validacao (2 tecnicos, 3 h, 200 + 200 km). */
@@ -77,6 +91,7 @@ export function osPayload(catalog: Catalog, overrides: Record<string, unknown> =
     location: 'Usina Solar Campo Grande I',
     description: 'Realizar manutenção preventiva e inspeção dos equipamentos.',
     technicianCount: '2',
+    technicians: [{ name: 'Tecnico Um' }, { name: 'Tecnico Dois' }],
     hoursPerTechnician: '3',
     outboundKm: '200',
     returnKm: '200',

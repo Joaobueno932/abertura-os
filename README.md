@@ -1,7 +1,8 @@
 # O&M OS
 
 Sistema de Ordens de Serviço de operação e manutenção da **Em Conta Ltda**:
-abertura, acompanhamento em Kanban, orçamento do atendimento e emissão do
+abertura, acompanhamento em Kanban (com os chamados abertos junto à
+concessionária no mesmo quadro), orçamento do atendimento e emissão do
 documento oficial no papel timbrado da empresa.
 
 > **O&M OS** é o nome do sistema. As Ordens de Serviço continuam sendo emitidas
@@ -54,8 +55,9 @@ provisionamento serve para um acesso e nada mais.
 
 Rodar o seed novamente **nunca** redefine a senha de um administrador existente.
 
-Depois do primeiro acesso, cadastre pelo menos uma **usina** e um
-**responsável** em `/admin` antes de abrir a primeira OS.
+Depois do primeiro acesso, cadastre pelo menos uma **usina** (em
+`/cadastros/usinas`, aberto a qualquer usuário) e um **responsável** (em
+`/admin/responsaveis`) antes de abrir a primeira OS.
 
 ## Build e produção
 

@@ -60,6 +60,39 @@ describe('abertura de OS', () => {
     expect(order.openedAt).toBeInstanceOf(Date);
   });
 
+  it('lanca OS retroativa com abertura e numero do dia informado', async () => {
+    const { catalog, actor } = await setup();
+    const order = await createServiceOrder(
+      createOsSchema.parse(osPayload(catalog, { openedDate: '2026-09-15' })),
+      actor,
+    );
+
+    expect(order.openedAt.toISOString().slice(0, 10)).toBe('2026-09-15');
+    expect(order.number).toBe('20260915001');
+
+    // A sequencia daquele dia continua de onde parou, sem colidir.
+    const second = await createServiceOrder(
+      createOsSchema.parse(osPayload(catalog, { openedDate: '2026-09-15' })),
+      actor,
+    );
+    expect(second.number).toBe('20260915002');
+
+    // Sem data, a OS nasce hoje e com a numeracao de hoje.
+    const today = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    expect(today.number.endsWith('001')).toBe(true);
+    expect(today.number.startsWith('20260915')).toBe(false);
+  });
+
+  it('recusa data de abertura futura', async () => {
+    const { catalog } = await setup();
+    const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    expect(createOsSchema.safeParse(osPayload(catalog, { openedDate: future })).success).toBe(false);
+    expect(createOsSchema.safeParse(osPayload(catalog, { openedDate: '15/09/2026' })).success).toBe(
+      false,
+    );
+  });
+
   it('ignora subtotais e total enviados pelo cliente', async () => {
     const { catalog, actor } = await setup();
     const input = createOsSchema.parse(

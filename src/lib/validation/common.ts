@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { parseToCenti } from '@/lib/money';
-import { parseDateOnly } from '@/lib/datetime';
+import { businessDayKey, parseDateOnly } from '@/lib/datetime';
 import { badRequest } from '@/lib/http';
 
 /** Texto obrigatorio com limites de tamanho. */
@@ -72,6 +72,29 @@ export const dateOnly = (label: string) =>
       }
       return parsed;
     });
+
+/**
+ * Data de abertura opcional, para lancar registros retroativos. Ausente = hoje.
+ * Datas passadas sao livres - e justamente o caso de uso; so o futuro e
+ * recusado, porque abrir algo que ainda nao aconteceu seria erro de digitacao.
+ * Devolve a string "AAAA-MM-DD"; quem grava resolve o instante com resolveOpenedAt.
+ */
+export const openedDateOnly = z
+  .union([z.string(), z.null()])
+  .optional()
+  .transform((value, ctx) => {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw) return undefined;
+    if (!parseDateOnly(raw)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Data de abertura inválida.' });
+      return z.NEVER;
+    }
+    if (raw.replace(/-/g, '') > businessDayKey()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Data de abertura não pode ser futura.' });
+      return z.NEVER;
+    }
+    return raw;
+  });
 
 /** Converte erros do zod em AppError 400 com mapa de campos para o formulario. */
 export function parseOrThrow<T extends z.ZodTypeAny>(schema: T, data: unknown): z.infer<T> {

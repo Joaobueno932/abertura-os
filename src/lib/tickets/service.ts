@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma, isUniqueViolation, TX_OPTIONS } from '@/lib/prisma';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/http';
 import { normalizeDescription, normalizeText } from '@/lib/text';
-import { formatDateTimeBR } from '@/lib/datetime';
+import { formatDateTimeBR, resolveOpenedAt } from '@/lib/datetime';
 import { formatCenti } from '@/lib/money';
 import {
   canTransition,
@@ -139,11 +139,13 @@ export async function createUtilityTicket(
   // lock da linha de TicketSequence enquanto durar.
   await resolveReferences(prisma, input);
 
+  // Chamado retroativo: abertura, numeracao e prazo seguem o dia informado.
+  const openedAt = resolveOpenedAt(input.openedDate);
+
   for (let attempt = 1; attempt <= MAX_NUMBER_ATTEMPTS; attempt += 1) {
     try {
       return await prisma.$transaction(async (tx) => {
-        const { number } = await reserveTicketNumber(tx);
-        const openedAt = new Date();
+        const { number } = await reserveTicketNumber(tx, openedAt);
 
         const created = await tx.utilityTicket.create({
           data: {

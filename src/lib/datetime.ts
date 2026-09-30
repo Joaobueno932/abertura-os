@@ -65,6 +65,27 @@ export function parseDateOnly(value: string): Date | null {
   return date;
 }
 
+/** Hoje no formato do input type=date (AAAA-MM-DD), no fuso de negocio. */
+export function todayDateInput(timeZone: string = APP_TIMEZONE): string {
+  const key = businessDayKey(new Date(), timeZone);
+  return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6)}`;
+}
+
+/**
+ * Instante de abertura de um registro a partir da data opcional do formulario.
+ *
+ * Sem data, ou com a data de hoje, vale o instante atual - preserva a hora real
+ * da abertura no caso normal. Com uma data anterior, ancora no meio-dia UTC
+ * daquele dia (08:00 no fuso de negocio), que e o mesmo ponto usado pelos campos
+ * "somente data" e nao escorrega de dia em nenhum fuso.
+ */
+export function resolveOpenedAt(openedDate: string | undefined, now: Date = new Date()): Date {
+  if (!openedDate) return now;
+  const parsed = parseDateOnly(openedDate);
+  if (!parsed) return now;
+  return businessDayKey(parsed) === businessDayKey(now) ? now : parsed;
+}
+
 /** Formata um campo "somente data" (ancorado ao meio-dia UTC) como DD/MM/AAAA. */
 export function formatDateOnlyBR(date: Date): string {
   const d = String(date.getUTCDate()).padStart(2, '0');

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { api, ApiError } from '@/lib/api-client';
+import { todayDateInput } from '@/lib/datetime';
 import type { Options } from '@/lib/os/options';
 
 /**
@@ -21,6 +22,8 @@ export type TicketFormValues = {
   expectedHours: string;
   protocol: string;
   description: string;
+  /** Apenas na abertura. Vazio = hoje. */
+  openedDate: string;
 };
 
 type Props = {
@@ -38,6 +41,7 @@ const EMPTY: TicketFormValues = {
   expectedHours: '',
   protocol: '',
   description: '',
+  openedDate: '',
 };
 
 function optionLabel(option: { name: string; active?: boolean }): string {
@@ -67,10 +71,12 @@ export function TicketForm({ options, ticketId, initial }: Props) {
     setError(null);
     setFields({});
 
+    const { openedDate, ...base } = values;
+
     try {
       const saved = ticketId
-        ? await api.patch<{ id: string }>(`/api/chamados/${ticketId}`, values)
-        : await api.post<{ id: string }>('/api/chamados', values);
+        ? await api.patch<{ id: string }>(`/api/chamados/${ticketId}`, base)
+        : await api.post<{ id: string }>('/api/chamados', { ...base, openedDate });
       router.replace(`/chamados/${saved.id}`);
       router.refresh();
     } catch (caught) {
@@ -234,6 +240,29 @@ export function TicketForm({ options, ticketId, initial }: Props) {
             />
             {fieldError('protocol')}
           </div>
+
+          {ticketId ? null : (
+            <div>
+              <label htmlFor="openedDate" className="field-label">
+                Data de abertura
+              </label>
+              <input
+                id="openedDate"
+                type="date"
+                className="field-input"
+                max={todayDateInput()}
+                value={values.openedDate}
+                onChange={set('openedDate')}
+                aria-describedby="ticket-opened-date-hint"
+                aria-invalid={Boolean(fields.openedDate)}
+              />
+              <p id="ticket-opened-date-hint" className="mt-1 text-xs text-ink-500">
+                Deixe em branco para hoje. Use uma data anterior para lançar chamados retroativos — o
+                prazo de solução é contado a partir dela.
+              </p>
+              {fieldError('openedDate')}
+            </div>
+          )}
         </div>
       </section>
 

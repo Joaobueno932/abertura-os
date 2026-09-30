@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { businessDayKey, parseDateOnly } from '@/lib/datetime';
 import { OS_STATUSES } from '@/lib/os/status';
-import { cuid, dateOnly, decimalCenti, positiveInt, requiredText } from './common';
+import { cuid, dateOnly, decimalCenti, openedDateOnly, positiveInt, requiredText } from './common';
 
 const MAX_HOURS_CENTI = 24 * 100 * 31; // teto defensivo
 const MAX_KM_CENTI = 100_000 * 100;
@@ -79,31 +78,10 @@ const osFullSchema = osBaseSchema.merge(osCostsSchema).superRefine((data, ctx) =
   }
 });
 
-/**
- * Data de abertura opcional, para lancar OS retroativas. Ausente = hoje.
- * Datas passadas sao livres; so o futuro e recusado.
- */
-const openedDateSchema = z
-  .union([z.string(), z.null()])
-  .optional()
-  .transform((value, ctx) => {
-    const raw = typeof value === 'string' ? value.trim() : '';
-    if (!raw) return undefined;
-    const parsed = parseDateOnly(raw);
-    if (!parsed) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Data de abertura inválida.' });
-      return z.NEVER;
-    }
-    if (raw.replace(/-/g, '') > businessDayKey()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Data de abertura não pode ser futura.' });
-      return z.NEVER;
-    }
-    return raw;
-  });
-
+/** Na abertura cabe a data retroativa; na edicao nao, ela fixaria outro numero. */
 export const createOsSchema = osBaseSchema
   .merge(osCostsSchema)
-  .extend({ openedDate: openedDateSchema })
+  .extend({ openedDate: openedDateOnly })
   .superRefine((data, ctx) => {
     if (data.technicians.length !== data.technicianCount) {
       ctx.addIssue({

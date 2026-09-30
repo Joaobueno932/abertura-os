@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { cuid, decimalCenti, requiredText } from './common';
+import { cuid, decimalCenti, openedDateOnly, requiredText } from './common';
 
 /** Teto defensivo: 90 dias de previsao para solucao. */
 const MAX_HOURS_CENTI = 24 * 90 * 100;
@@ -16,7 +16,12 @@ export const ticketBaseSchema = z.object({
   description: requiredText('Descricao', 4000, 5),
 });
 
-export const createTicketSchema = ticketBaseSchema;
+/**
+ * Na abertura cabe a data retroativa; na edicao nao, ela fixaria outro numero.
+ * O prazo de solucao e recontado a partir dela, entao um chamado lancado
+ * retroativo ja nasce com o prazo correto daquele dia - vencido, se for o caso.
+ */
+export const createTicketSchema = ticketBaseSchema.extend({ openedDate: openedDateOnly });
 export const updateTicketSchema = ticketBaseSchema;
 
 export type CreateTicketInput = z.infer<typeof createTicketSchema>;

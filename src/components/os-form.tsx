@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState, type FormEvent } from 'react';
 import { api, ApiError } from '@/lib/api-client';
 import { calculateCosts, CostValidationError } from '@/lib/os/costs';
+import { businessDayKey } from '@/lib/datetime';
 import { formatBRL, formatCenti, parseToCenti } from '@/lib/money';
 import type { Options } from '@/lib/os/options';
 
@@ -27,6 +28,8 @@ export type OsFormValues = {
   hoursPerTechnician: string;
   outboundKm: string;
   returnKm: string;
+  /** Apenas na abertura. Vazio = hoje. */
+  openedDate: string;
 };
 
 export type Rates = { technicalHourlyRateCents: number; kmRateCents: number };
@@ -52,7 +55,14 @@ const EMPTY: OsFormValues = {
   hoursPerTechnician: '',
   outboundKm: '0',
   returnKm: '0',
+  openedDate: '',
 };
+
+/** Hoje no formato do input type=date (AAAA-MM-DD), no fuso de negocio. */
+function todayInput(): string {
+  const key = businessDayKey();
+  return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6)}`;
+}
 
 /** Teto de campos abertos de uma vez, para nao travar a tela por um digito errado. */
 const MAX_TECHNICIAN_FIELDS = 20;
@@ -190,6 +200,7 @@ export function OsForm({ options, rates, osId, initial }: Props) {
       hoursPerTechnician: values.hoursPerTechnician,
       outboundKm: values.outboundKm || '0',
       returnKm: values.returnKm || '0',
+      ...(osId ? {} : { openedDate: values.openedDate }),
     };
 
     try {
@@ -338,6 +349,28 @@ export function OsForm({ options, rates, osId, initial }: Props) {
             />
             {fieldError('expectedDate')}
           </div>
+
+          {osId ? null : (
+            <div>
+              <label htmlFor="openedDate" className="field-label">
+                Data de abertura
+              </label>
+              <input
+                id="openedDate"
+                type="date"
+                className="field-input"
+                max={todayInput()}
+                value={values.openedDate}
+                onChange={set('openedDate')}
+                aria-describedby="opened-date-hint"
+                aria-invalid={Boolean(fields.openedDate)}
+              />
+              <p id="opened-date-hint" className="mt-1 text-xs text-ink-500">
+                Deixe em branco para hoje. Use uma data anterior para lançar OS retroativas.
+              </p>
+              {fieldError('openedDate')}
+            </div>
+          )}
 
           <div className="md:col-span-2">
             <label htmlFor="location" className="field-label">

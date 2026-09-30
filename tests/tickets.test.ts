@@ -70,6 +70,32 @@ describe('abertura de chamado da concessionaria', () => {
     expect(events[0]?.type).toBe('CRIADO');
   });
 
+  it('lanca chamado retroativo com abertura, numero e prazo do dia informado', async () => {
+    const { catalog, actor } = await setup();
+    const ticket = await createUtilityTicket(
+      createTicketSchema.parse(ticketPayload(catalog, { openedDate: '2026-09-15' })),
+      actor,
+    );
+
+    // Abertura ancorada no dia informado, e o numero segue a sequencia dele.
+    expect(ticket.openedAt.toISOString().slice(0, 10)).toBe('2026-09-15');
+    expect(ticket.number).toBe('CH20260915001');
+    // O prazo conta a partir da abertura retroativa, nao de agora.
+    expect(ticket.dueAt.getTime() - ticket.openedAt.getTime()).toBe(4 * 60 * 60 * 1000);
+    expect(isTicketOverdue(ticket)).toBe(true);
+  });
+
+  it('recusa data de abertura futura', async () => {
+    const { catalog } = await setup();
+    const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const parsed = createTicketSchema.safeParse(ticketPayload(catalog, { openedDate: future }));
+    expect(parsed.success).toBe(false);
+
+    // Sem data continua valendo, e a abertura e agora.
+    expect(createTicketSchema.safeParse(ticketPayload(catalog)).success).toBe(true);
+  });
+
   it('a numeracao dos chamados nao consome a das OS', async () => {
     const { catalog, actor } = await setup();
     const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);

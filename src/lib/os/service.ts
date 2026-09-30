@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma, isUniqueViolation, TX_OPTIONS } from '@/lib/prisma';
 import { badRequest, conflict, forbidden, notFound } from '@/lib/http';
 import { normalizeDescription, normalizeText } from '@/lib/text';
-import { businessDayKey, formatDateOnlyBR, parseDateOnly } from '@/lib/datetime';
+import { formatDateOnlyBR, resolveOpenedAt } from '@/lib/datetime';
 import { formatBRL, formatCenti } from '@/lib/money';
 import { getRates, type Rates } from '@/lib/settings';
 import { calculateCosts, CostValidationError } from './costs';
@@ -210,11 +210,8 @@ export async function createServiceOrder(
   await resolveReferences(prisma, input);
   const technicians = await resolveTechnicians(prisma, input.technicians);
 
-  // OS retroativa: abertura e numeracao seguem o dia informado. Sem data, ou
-  // com a data de hoje, vale o instante atual.
-  const now = new Date();
-  const openedDay = input.openedDate ? parseDateOnly(input.openedDate) : null;
-  const openedAt = openedDay && businessDayKey(openedDay) !== businessDayKey(now) ? openedDay : now;
+  // OS retroativa: abertura e numeracao seguem o dia informado.
+  const openedAt = resolveOpenedAt(input.openedDate);
 
   for (let attempt = 1; attempt <= MAX_NUMBER_ATTEMPTS; attempt += 1) {
     try {

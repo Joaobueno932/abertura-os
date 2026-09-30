@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState, type FormEvent } from 'react';
 import { api, ApiError } from '@/lib/api-client';
 import { calculateCosts, CostValidationError } from '@/lib/os/costs';
-import { businessDayKey } from '@/lib/datetime';
+import { todayDateInput } from '@/lib/datetime';
 import { formatBRL, formatCenti, parseToCenti } from '@/lib/money';
 import type { Options } from '@/lib/os/options';
 
@@ -57,12 +57,6 @@ const EMPTY: OsFormValues = {
   returnKm: '0',
   openedDate: '',
 };
-
-/** Hoje no formato do input type=date (AAAA-MM-DD), no fuso de negocio. */
-function todayInput(): string {
-  const key = businessDayKey();
-  return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6)}`;
-}
 
 /** Teto de campos abertos de uma vez, para nao travar a tela por um digito errado. */
 const MAX_TECHNICIAN_FIELDS = 20;
@@ -359,7 +353,7 @@ export function OsForm({ options, rates, osId, initial }: Props) {
                 id="openedDate"
                 type="date"
                 className="field-input"
-                max={todayInput()}
+                max={todayDateInput()}
                 value={values.openedDate}
                 onChange={set('openedDate')}
                 aria-describedby="opened-date-hint"

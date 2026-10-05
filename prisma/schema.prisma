@@ -135,6 +135,10 @@ model ServiceOrder {
   /// Motivo obrigatorio ao cancelar. Zerado se a OS for reaberta.
   cancellationReasonId String?
 
+  /// Observacao obrigatoria ao concluir: o que foi feito no atendimento.
+  /// Zerada se a OS for retrocedida, mas permanece no historico.
+  completionNote String?
+
   // --- Custos do atendimento (snapshot historico: os valores unitarios usados
   // no momento do calculo ficam gravados na propria OS) ---
   technicianCount          Int
@@ -280,6 +284,10 @@ model UtilityTicket {
 
   /// Motivo obrigatorio ao cancelar. Zerado se o chamado for reaberto.
   cancellationReasonId String?
+
+  /// Observacao obrigatoria ao concluir: como o chamado foi resolvido.
+  /// Zerada se o chamado for retrocedido, mas permanece no historico.
+  completionNote String?
 
   createdById String
   updatedById String?

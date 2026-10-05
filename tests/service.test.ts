@@ -313,7 +313,9 @@ describe('movimentacao de status', () => {
     const waiting = await changeServiceOrderStatus(order.id, 'AGUARDANDO', actor);
     expect(waiting.status).toBe('AGUARDANDO');
 
-    const done = await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor);
+    const done = await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor, {
+      completionNote: 'Inversor reiniciado e geração normalizada.',
+    });
     expect(done.status).toBe('CONCLUIDA');
     expect(done.updatedBy?.id).toBe(actor.id);
 
@@ -345,7 +347,9 @@ describe('movimentacao de status', () => {
   it('somente administrador retrocede uma OS encerrada, e com justificativa', async () => {
     const { catalog, actor, admin } = await setup();
     const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
-    await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor);
+    await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor, {
+      completionNote: 'Atendimento concluído em campo.',
+    });
 
     await expect(changeServiceOrderStatus(order.id, 'ABERTA', actor)).rejects.toThrow(
       /administrador/i,
@@ -383,6 +387,52 @@ describe('movimentacao de status', () => {
     });
     expect(cancelled.status).toBe('CANCELADA');
     expect(cancelled.cancellationReason?.label).toBe(reason.label);
+  });
+
+  it('concluir exige a observacao de finalizacao, gravada na OS e no historico', async () => {
+    const { catalog, actor } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+
+    // Sem observacao nenhuma, e com uma curta demais: as duas recusadas.
+    await expect(changeServiceOrderStatus(order.id, 'CONCLUIDA', actor)).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(
+      changeServiceOrderStatus(order.id, 'CONCLUIDA', actor, { completionNote: 'ok' }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    const stillOpen = await prisma.serviceOrder.findUniqueOrThrow({
+      where: { id: order.id },
+      select: { status: true },
+    });
+    expect(stillOpen.status).toBe('ABERTA');
+
+    const done = await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor, {
+      completionNote: 'String do inversor 2 substituída; geração conferida no local.',
+    });
+    expect(done.status).toBe('CONCLUIDA');
+    expect(done.completionNote).toBe(
+      'String do inversor 2 substituída; geração conferida no local.',
+    );
+
+    const [latest] = await getServiceOrderEvents(order.id);
+    expect(latest?.details).toContain('String do inversor 2 substituída');
+  });
+
+  it('retroceder limpa a observacao de finalizacao, que permanece no historico', async () => {
+    const { catalog, actor, admin } = await setup();
+    const order = await createServiceOrder(createOsSchema.parse(osPayload(catalog)), actor);
+    await changeServiceOrderStatus(order.id, 'CONCLUIDA', actor, {
+      completionNote: 'Limpeza dos módulos concluída.',
+    });
+
+    const reopened = await changeServiceOrderStatus(order.id, 'EM_ANDAMENTO', admin, {
+      reason: 'Faltou conferir a string 3.',
+    });
+    expect(reopened.completionNote).toBeNull();
+
+    const events = await getServiceOrderEvents(order.id);
+    expect(events.some((event) => event.details?.includes('Limpeza dos módulos'))).toBe(true);
   });
 
   it('reabrir limpa o motivo do cancelamento, que permanece no historico', async () => {

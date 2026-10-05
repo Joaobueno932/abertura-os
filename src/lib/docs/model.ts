@@ -41,6 +41,8 @@ export type OsDocumentModel = {
   expectedDate: string;
   location: string;
   description: string;
+  /** Observacao de finalizacao. Vazia enquanto a OS nao foi concluida. */
+  completionNote: string;
   costs: OsDocumentCosts;
   /** Base do nome de arquivo, ja sanitizada: OS-20260831001 */
   fileBaseName: string;
@@ -85,6 +87,7 @@ export function buildOsDocumentModel(order: ServiceOrderDetail): OsDocumentModel
     expectedDate: formatDateOnlyBR(order.expectedDate),
     location: order.location,
     description: order.description,
+    completionNote: order.completionNote ?? '',
     costs: {
       technicianCount: String(technicianCount),
       hoursPerTechnician: hoursText,
@@ -150,6 +153,17 @@ export function documentSections(model: OsDocumentModel): DocSection[] {
       ],
     },
     { kind: 'paragraph', heading: 'DESCRIÇÃO', text: model.description },
+    // O que foi pedido e o que foi feito ficam lado a lado. A secao so existe
+    // quando a OS foi concluida: antes disso nao ha nada a relatar.
+    ...(model.completionNote
+      ? [
+          {
+            kind: 'paragraph' as const,
+            heading: 'OBSERVAÇÃO DE FINALIZAÇÃO',
+            text: model.completionNote,
+          },
+        ]
+      : []),
     // O valor fica visualmente separado do restante: mesmo que a OS termine no
     // meio da primeira pagina, esta parte comeca na pagina seguinte.
     { kind: 'pageBreak' },

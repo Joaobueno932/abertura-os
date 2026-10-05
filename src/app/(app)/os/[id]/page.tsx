@@ -140,6 +140,15 @@ export default async function OsDetailPage({ params }: { params: Params }) {
             </p>
           </section>
 
+          {order.completionNote ? (
+            <section className="card p-4 sm:p-5">
+              <h2 className="section-title">Observação de finalização</h2>
+              <p className="mt-3 text-sm leading-relaxed whitespace-pre-line text-ink-900">
+                {order.completionNote}
+              </p>
+            </section>
+          ) : null}
+
           <section className="card p-4 sm:p-5">
             <h2 className="section-title">Valor do atendimento</h2>
 

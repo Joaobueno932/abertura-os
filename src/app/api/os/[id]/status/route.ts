@@ -14,8 +14,9 @@ type Context = { params: Promise<{ id: string }> };
  * Movimentacao de status (Kanban ou menu de acoes). A transicao e validada no
  * servidor, registra data/hora e o usuario responsavel pela alteracao.
  *
- * O motivo do cancelamento e a justificativa de reabertura chegam aqui, mas
- * quem decide se sao obrigatorios e o servico, que conhece o status atual.
+ * O motivo do cancelamento, a observacao de finalizacao e a justificativa de
+ * reabertura chegam aqui, mas quem decide se sao obrigatorios e o servico, que
+ * conhece o status atual.
  */
 export const PATCH = withErrorHandling(async (request: Request, context: Context) => {
   const actor = await requireUser();

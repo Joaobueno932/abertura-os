@@ -9,12 +9,17 @@ import {
   isOsStatus,
   requiresAdminToTransition,
   requiresCancellationReason,
+  requiresCompletionNote,
   requiresReopenReason,
   STATUS_LABEL,
   type OsStatus,
 } from '@/lib/os/status';
 import { serializeChanges, type FieldChange } from '@/lib/os/history';
-import { normalizeReopenReason, resolveCancellationReason } from '@/lib/os/service';
+import {
+  normalizeCompletionNote,
+  normalizeReopenReason,
+  resolveCancellationReason,
+} from '@/lib/os/service';
 import { reserveTicketNumber } from './numbering';
 import type { ChangeStatusInput, OsFilters } from '@/lib/validation/os';
 import type { CreateTicketInput, UpdateTicketInput } from '@/lib/validation/ticket';
@@ -53,6 +58,7 @@ const detailSelect = {
   createdBy: { select: { id: true, name: true } },
   updatedBy: { select: { id: true, name: true } },
   cancellationReason: { select: { id: true, label: true } },
+  completionNote: true,
 } satisfies Prisma.UtilityTicketSelect;
 
 export type UtilityTicketListItem = Prisma.UtilityTicketGetPayload<{ select: typeof listSelect }>;
@@ -299,8 +305,9 @@ export async function updateUtilityTicket(
 }
 
 /**
- * Mesmas regras de status das OS: motivo cadastrado ao cancelar, e perfil de
- * administrador mais justificativa escrita para retroceder um chamado encerrado.
+ * Mesmas regras de status das OS: motivo cadastrado ao cancelar, observacao de
+ * finalizacao ao concluir, e perfil de administrador mais justificativa escrita
+ * para retroceder um chamado encerrado.
  */
 export async function changeUtilityTicketStatus(
   id: string,
@@ -345,6 +352,9 @@ export async function changeUtilityTicketStatus(
           current.cancellationReasonId,
         )
       : null;
+    const completionNote = requiresCompletionNote(nextStatus)
+      ? normalizeCompletionNote(options.completionNote)
+      : null;
     const reopenReason = requiresReopenReason(from) ? normalizeReopenReason(options.reason) : null;
 
     const updated = await tx.utilityTicket.update({
@@ -353,6 +363,7 @@ export async function changeUtilityTicketStatus(
         status: nextStatus,
         updatedById: actor.id,
         cancellationReasonId: cancellation ? cancellation.id : null,
+        completionNote,
       },
       select: detailSelect,
     });
@@ -366,6 +377,14 @@ export async function changeUtilityTicketStatus(
         label: 'Motivo do cancelamento',
         from: '',
         to: cancellation.label,
+      });
+    }
+    if (completionNote) {
+      changes.push({
+        field: 'completionNote',
+        label: 'Observação de finalização',
+        from: '',
+        to: completionNote,
       });
     }
     if (reopenReason) {

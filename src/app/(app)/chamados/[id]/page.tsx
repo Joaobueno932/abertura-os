@@ -128,6 +128,15 @@ export default async function ChamadoDetailPage({ params }: { params: Params }) 
               {ticket.description}
             </p>
           </section>
+
+          {ticket.completionNote ? (
+            <section className="card p-4 sm:p-5">
+              <h2 className="section-title">Observação de finalização</h2>
+              <p className="mt-3 text-sm leading-relaxed whitespace-pre-line text-ink-900">
+                {ticket.completionNote}
+              </p>
+            </section>
+          ) : null}
         </div>
 
         <div className="grid content-start gap-5">

@@ -69,5 +69,18 @@ export function requiresReopenReason(from: OsStatus): boolean {
   return isTerminal(from);
 }
 
+/**
+ * Concluir exige a observacao de finalizacao: o relato do que foi feito no
+ * atendimento. Vale para todos os perfis e para os dois caminhos de conclusao
+ * (quadro Kanban ou tela de detalhes) - nenhum registro e encerrado sem ela.
+ */
+export function requiresCompletionNote(to: OsStatus): boolean {
+  return to === 'CONCLUIDA';
+}
+
 /** Tamanho minimo da justificativa de reabertura. */
 export const MIN_REOPEN_REASON_LENGTH = 5;
+
+/** Tamanho minimo e maximo da observacao de finalizacao. */
+export const MIN_COMPLETION_NOTE_LENGTH = 5;
+export const MAX_COMPLETION_NOTE_LENGTH = 1000;

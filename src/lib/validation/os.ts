@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { OS_STATUSES } from '@/lib/os/status';
+import { MAX_COMPLETION_NOTE_LENGTH, OS_STATUSES } from '@/lib/os/status';
 import { cuid, dateOnly, decimalCenti, openedDateOnly, positiveInt, requiredText } from './common';
 
 const MAX_HOURS_CENTI = 24 * 100 * 31; // teto defensivo
@@ -94,9 +94,10 @@ export const createOsSchema = osBaseSchema
 export const updateOsSchema = osFullSchema;
 
 /**
- * Movimentacao de status. O motivo do cancelamento e a justificativa de
- * reabertura sao exigidos conforme o status de origem/destino - a checagem
- * final acontece no servico, que conhece o status atual do registro.
+ * Movimentacao de status. O motivo do cancelamento, a observacao de finalizacao
+ * e a justificativa de reabertura sao exigidos conforme o status de
+ * origem/destino - a checagem final acontece no servico, que conhece o status
+ * atual do registro.
  */
 export const changeStatusSchema = z.object({
   status: z.enum(OS_STATUSES, { errorMap: () => ({ message: 'Status inválido.' }) }),
@@ -104,6 +105,8 @@ export const changeStatusSchema = z.object({
   cancellationReasonId: z.string().trim().max(64).optional(),
   /** Justificativa escrita, obrigatoria ao retroceder um registro encerrado. */
   reason: z.string().trim().max(500).optional(),
+  /** Observacao escrita, obrigatoria ao concluir. */
+  completionNote: z.string().trim().max(MAX_COMPLETION_NOTE_LENGTH).optional(),
 });
 
 export type ChangeStatusInput = z.infer<typeof changeStatusSchema>;

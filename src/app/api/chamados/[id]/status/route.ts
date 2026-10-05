@@ -12,8 +12,9 @@ type Context = { params: Promise<{ id: string }> };
 
 /**
  * Movimentacao de status do chamado (Kanban ou tela de detalhes). Mesmas regras
- * das OS: motivo cadastrado ao cancelar, administrador mais justificativa para
- * retroceder um chamado encerrado. Tudo validado no servidor.
+ * das OS: motivo cadastrado ao cancelar, observacao de finalizacao ao concluir,
+ * administrador mais justificativa para retroceder um chamado encerrado. Tudo
+ * validado no servidor.
  */
 export const PATCH = withErrorHandling(async (request: Request, context: Context) => {
   const actor = await requireUser();

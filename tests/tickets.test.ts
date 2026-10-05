@@ -149,13 +149,35 @@ describe('movimentacao de status do chamado', () => {
     expect(cancelled.cancellationReason?.label).toBe(reason.label);
   });
 
+  it('concluir exige a observacao de finalizacao', async () => {
+    const { catalog, actor } = await setup();
+    const ticket = await createUtilityTicket(
+      createTicketSchema.parse(ticketPayload(catalog)),
+      actor,
+    );
+
+    await expect(changeUtilityTicketStatus(ticket.id, 'CONCLUIDA', actor)).rejects.toMatchObject({
+      status: 400,
+    });
+
+    const done = await changeUtilityTicketStatus(ticket.id, 'CONCLUIDA', actor, {
+      completionNote: 'Protocolo encerrado: religamento feito pela concessionária.',
+    });
+    expect(done.status).toBe('CONCLUIDA');
+    expect(done.completionNote).toBe(
+      'Protocolo encerrado: religamento feito pela concessionária.',
+    );
+  });
+
   it('somente administrador retrocede, e com justificativa', async () => {
     const { catalog, actor, admin } = await setup();
     const ticket = await createUtilityTicket(
       createTicketSchema.parse(ticketPayload(catalog)),
       actor,
     );
-    await changeUtilityTicketStatus(ticket.id, 'CONCLUIDA', actor);
+    await changeUtilityTicketStatus(ticket.id, 'CONCLUIDA', actor, {
+      completionNote: 'Concessionária restabeleceu o fornecimento.',
+    });
 
     await expect(changeUtilityTicketStatus(ticket.id, 'ABERTA', actor)).rejects.toThrow(
       /administrador/i,

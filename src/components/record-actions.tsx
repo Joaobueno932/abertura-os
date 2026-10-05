@@ -9,6 +9,7 @@ import {
   isTerminal,
   OS_STATUSES,
   requiresCancellationReason,
+  requiresCompletionNote,
   requiresReopenReason,
   STATUS_LABEL,
   type OsStatus,
@@ -109,9 +110,13 @@ export function RecordActions({ kind, id, number, status, canEdit, isAdmin, reas
     }
   }
 
-  /** Cancelar e retroceder passam pelo dialogo; o resto vai direto. */
+  /** Cancelar, concluir e retroceder passam pelo dialogo; o resto vai direto. */
   function start(next: OsStatus) {
-    if (requiresCancellationReason(next) || requiresReopenReason(status)) {
+    if (
+      requiresCancellationReason(next) ||
+      requiresCompletionNote(next) ||
+      requiresReopenReason(status)
+    ) {
       setError(null);
       setNotice(null);
       setPendingTarget(next);
@@ -120,7 +125,15 @@ export function RecordActions({ kind, id, number, status, canEdit, isAdmin, reas
     void changeStatus(next);
   }
 
-  const dialogMode: StatusReasonMode = requiresReopenReason(status) ? 'RETROCEDER' : 'CANCELAR';
+  /**
+   * Os tres modos nunca se sobrepoem: de um registro encerrado so se sai para
+   * Aberta/Em andamento, e nenhuma dessas transicoes pede motivo ou observacao.
+   */
+  function dialogModeFor(next: OsStatus): StatusReasonMode {
+    if (requiresReopenReason(status)) return 'RETROCEDER';
+    if (requiresCompletionNote(next)) return 'CONCLUIR';
+    return 'CANCELAR';
+  }
 
   return (
     <div className="no-print grid gap-3">
@@ -223,7 +236,7 @@ export function RecordActions({ kind, id, number, status, canEdit, isAdmin, reas
 
       {pendingTarget ? (
         <StatusReasonDialog
-          mode={dialogMode}
+          mode={dialogModeFor(pendingTarget)}
           recordLabel={`${copy.singular === 'OS' ? 'OS' : 'Chamado'} ${number}`}
           from={status}
           to={pendingTarget}

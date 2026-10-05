@@ -5,6 +5,7 @@ import JSZip from 'jszip';
 import { PDFDocument } from 'pdf-lib';
 import { prisma } from '@/lib/prisma';
 import { createServiceOrder, getServiceOrderDetail, type ServiceOrderDetail } from '@/lib/os/service';
+import { changeServiceOrderStatus } from '@/lib/os/service';
 import { createOsSchema } from '@/lib/validation/os';
 import { buildOsDocumentModel, documentFileName } from '@/lib/docs/model';
 import { generateOsDocx } from '@/lib/docs/docx';
@@ -307,6 +308,49 @@ describe('PDF gerado', () => {
     const detail = (await getServiceOrderDetail(created.id))!;
     const bytes = await generateOsPdf(buildOsDocumentModel(detail));
     expect(Buffer.from(bytes.slice(0, 5)).toString('latin1')).toBe('%PDF-');
+  });
+});
+
+describe('observacao de finalizacao no documento', () => {
+  it('nao aparece enquanto a OS nao foi concluida', async () => {
+    const model = buildOsDocumentModel(order);
+    expect(model.completionNote).toBe('');
+
+    const generated = await JSZip.loadAsync(Buffer.from(docx));
+    const body = await generated.file('word/document.xml')!.async('string');
+    expect(body).not.toContain('OBSERVAÇÃO DE FINALIZAÇÃO');
+  });
+
+  it('entra no DOCX e no PDF depois da conclusao, antes do valor', async () => {
+    const plant = await prisma.plant.findFirstOrThrow();
+    const institution = await prisma.institution.findFirstOrThrow();
+    const responsible = await prisma.responsible.findFirstOrThrow();
+    const actor = await createUser({ role: 'USER' });
+
+    const created = await createServiceOrder(
+      createOsSchema.parse(osPayload({ plant, institution, responsible })),
+      actor,
+    );
+    await changeServiceOrderStatus(created.id, 'CONCLUIDA', actor, {
+      completionNote: 'Inversor 2 substituído e geração conferida no local.',
+    });
+
+    const detail = (await getServiceOrderDetail(created.id))!;
+    const model = buildOsDocumentModel(detail);
+    expect(model.completionNote).toBe('Inversor 2 substituído e geração conferida no local.');
+
+    const generated = await JSZip.loadAsync(Buffer.from(await generateOsDocx(model)));
+    const body = await generated.file('word/document.xml')!.async('string');
+    expect(body).toContain('OBSERVAÇÃO DE FINALIZAÇÃO');
+    expect(body).toContain('Inversor 2 substituído e geração conferida no local.');
+
+    // Entre a descricao e a quebra que isola o valor do atendimento.
+    const noteAt = body.indexOf('OBSERVAÇÃO DE FINALIZAÇÃO');
+    expect(body.indexOf('DESCRIÇÃO')).toBeLessThan(noteAt);
+    expect(noteAt).toBeLessThan(body.indexOf('<w:br w:type="page"/>'));
+
+    const text = extractPdfText(await generateOsPdf(model));
+    expect(text).toContain('Inversor 2 substitu');
   });
 });
 

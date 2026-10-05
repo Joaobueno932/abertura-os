@@ -11,9 +11,11 @@ import { serializeChanges, type FieldChange } from './history';
 import {
   canTransition,
   isOsStatus,
+  MIN_COMPLETION_NOTE_LENGTH,
   MIN_REOPEN_REASON_LENGTH,
   requiresAdminToTransition,
   requiresCancellationReason,
+  requiresCompletionNote,
   requiresReopenReason,
   STATUS_LABEL,
   type OsStatus,
@@ -69,6 +71,7 @@ const detailSelect = {
   updatedBy: { select: { id: true, name: true } },
   technicians: technicianSelect,
   cancellationReason: { select: { id: true, label: true } },
+  completionNote: true,
 } satisfies Prisma.ServiceOrderSelect;
 
 export type ServiceOrderListItem = Prisma.ServiceOrderGetPayload<{ select: typeof listSelect }>;
@@ -513,11 +516,29 @@ export function normalizeReopenReason(reason: string | undefined): string {
 }
 
 /**
+ * Observacao escrita exigida ao concluir, para OS e para chamados.
+ *
+ * Nao e normalizada como os demais campos de texto: e o relato do atendimento,
+ * e vale preservar exatamente o que o tecnico escreveu, inclusive as quebras de
+ * linha.
+ */
+export function normalizeCompletionNote(note: string | undefined): string {
+  const text = (note ?? '').trim();
+  if (text.length < MIN_COMPLETION_NOTE_LENGTH) {
+    throw badRequest('Informe a observação de finalização.', {
+      completionNote: `Descreva a finalização com pelo menos ${MIN_COMPLETION_NOTE_LENGTH} caracteres.`,
+    });
+  }
+  return text;
+}
+
+/**
  * Movimenta o status da OS.
  *
- * Tres regras de negocio, todas validadas aqui (o frontend apenas as reflete):
+ * Quatro regras de negocio, todas validadas aqui (o frontend apenas as reflete):
  *
  * - cancelar exige um motivo cadastrado;
+ * - concluir exige a observacao de finalizacao, de qualquer perfil;
  * - retroceder uma OS Concluida/Cancelada e exclusivo de administrador...
  * - ...e exige uma justificativa escrita, que fica no historico.
  */
@@ -556,6 +577,9 @@ export async function changeServiceOrderStatus(
     const cancellation = requiresCancellationReason(nextStatus)
       ? await resolveCancellationReason(tx, options.cancellationReasonId, current.cancellationReasonId)
       : null;
+    const completionNote = requiresCompletionNote(nextStatus)
+      ? normalizeCompletionNote(options.completionNote)
+      : null;
     const reopenReason = requiresReopenReason(from) ? normalizeReopenReason(options.reason) : null;
 
     const updated = await tx.serviceOrder.update({
@@ -566,6 +590,8 @@ export async function changeServiceOrderStatus(
         // O motivo acompanha o cancelamento: ao sair de Cancelada ele deixa de
         // valer e e limpo, mas continua registrado no historico.
         cancellationReasonId: cancellation ? cancellation.id : null,
+        // A observacao acompanha a conclusao, pela mesma razao.
+        completionNote,
       },
       select: detailSelect,
     });
@@ -579,6 +605,14 @@ export async function changeServiceOrderStatus(
         label: 'Motivo do cancelamento',
         from: '',
         to: cancellation.label,
+      });
+    }
+    if (completionNote) {
+      changes.push({
+        field: 'completionNote',
+        label: 'Observação de finalização',
+        from: '',
+        to: completionNote,
       });
     }
     if (reopenReason) {

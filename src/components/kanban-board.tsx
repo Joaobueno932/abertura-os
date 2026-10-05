@@ -8,6 +8,7 @@ import {
   isTerminal,
   OS_STATUSES,
   requiresCancellationReason,
+  requiresCompletionNote,
   requiresReopenReason,
   STATUS_LABEL,
   type OsStatus,
@@ -16,6 +17,7 @@ import type { BoardCard } from '@/lib/board';
 import type { CancellationReasonOption } from '@/lib/os/cancellation';
 import {
   StatusReasonDialog,
+  type StatusReasonMode,
   type StatusReasonPayload,
 } from './status-reason-dialog';
 
@@ -92,8 +94,9 @@ export function KanbanBoard({ cards, totals, truncated, isAdmin, reasons }: Prop
   }
 
   /**
-   * Cancelar exige motivo e retroceder exige justificativa: nesses casos o
-   * movimento passa pelo dialogo antes de ir ao servidor.
+   * Cancelar exige motivo, concluir exige a observacao de finalizacao e
+   * retroceder exige justificativa: nesses casos o movimento passa pelo dialogo
+   * antes de ir ao servidor.
    */
   function start(id: string, status: OsStatus) {
     const card = items.find((item) => item.id === id);
@@ -107,12 +110,23 @@ export function KanbanBoard({ cards, totals, truncated, isAdmin, reasons }: Prop
       );
       return;
     }
-    if (requiresCancellationReason(status) || requiresReopenReason(card.status)) {
+    if (
+      requiresCancellationReason(status) ||
+      requiresCompletionNote(status) ||
+      requiresReopenReason(card.status)
+    ) {
       setError(null);
       setPending({ card, to: status });
       return;
     }
     void move(card, status);
+  }
+
+  /** Mesma precedencia da tela de detalhes; os modos nunca se sobrepoem. */
+  function dialogModeFor(from: OsStatus, to: OsStatus): StatusReasonMode {
+    if (requiresReopenReason(from)) return 'RETROCEDER';
+    if (requiresCompletionNote(to)) return 'CONCLUIR';
+    return 'CANCELAR';
   }
 
   return (
@@ -269,7 +283,7 @@ export function KanbanBoard({ cards, totals, truncated, isAdmin, reasons }: Prop
 
       {pending ? (
         <StatusReasonDialog
-          mode={requiresReopenReason(pending.card.status) ? 'RETROCEDER' : 'CANCELAR'}
+          mode={dialogModeFor(pending.card.status, pending.to)}
           recordLabel={`${KIND_LABEL[pending.card.kind]} ${pending.card.number}`}
           from={pending.card.status}
           to={pending.to}

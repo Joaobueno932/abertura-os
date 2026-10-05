@@ -1,23 +1,41 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { MIN_REOPEN_REASON_LENGTH, STATUS_LABEL, type OsStatus } from '@/lib/os/status';
+import {
+  MAX_COMPLETION_NOTE_LENGTH,
+  MIN_COMPLETION_NOTE_LENGTH,
+  MIN_REOPEN_REASON_LENGTH,
+  STATUS_LABEL,
+  type OsStatus,
+} from '@/lib/os/status';
 import type { CancellationReasonOption } from '@/lib/os/cancellation';
 
 /**
- * Justificativa exigida em duas movimentacoes de status:
+ * Justificativa exigida em tres movimentacoes de status:
  *
  * - CANCELAR: motivo escolhido entre os cadastrados (nunca texto livre, para
  *   que os cancelamentos continuem comparaveis entre si);
+ * - CONCLUIR: observacao de finalizacao, o relato do que foi feito. Exigida de
+ *   todos os perfis, venha a conclusao do quadro ou da tela de detalhes;
  * - RETROCEDER: um registro Concluido/Cancelado so volta atras por acao de
  *   administrador e com justificativa escrita, que fica no historico.
  *
  * O dialogo apenas coleta. A obrigatoriedade e revalidada no servidor.
  */
 
-export type StatusReasonMode = 'CANCELAR' | 'RETROCEDER';
+export type StatusReasonMode = 'CANCELAR' | 'CONCLUIR' | 'RETROCEDER';
 
-export type StatusReasonPayload = { cancellationReasonId?: string; reason?: string };
+export type StatusReasonPayload = {
+  cancellationReasonId?: string;
+  reason?: string;
+  completionNote?: string;
+};
+
+const TITLE: Record<StatusReasonMode, string> = {
+  CANCELAR: 'Cancelar registro',
+  CONCLUIR: 'Concluir registro',
+  RETROCEDER: 'Retroceder registro',
+};
 
 type Props = {
   mode: StatusReasonMode;
@@ -73,6 +91,17 @@ export function StatusReasonDialog({
       return;
     }
 
+    if (mode === 'CONCLUIR') {
+      if (text.trim().length < MIN_COMPLETION_NOTE_LENGTH) {
+        setLocalError(
+          `Descreva a finalização com pelo menos ${MIN_COMPLETION_NOTE_LENGTH} caracteres.`,
+        );
+        return;
+      }
+      onConfirm({ completionNote: text.trim() });
+      return;
+    }
+
     if (text.trim().length < MIN_REOPEN_REASON_LENGTH) {
       setLocalError(`Descreva o motivo com pelo menos ${MIN_REOPEN_REASON_LENGTH} caracteres.`);
       return;
@@ -80,7 +109,7 @@ export function StatusReasonDialog({
     onConfirm({ reason: text.trim() });
   }
 
-  const title = mode === 'CANCELAR' ? 'Cancelar registro' : 'Retroceder registro';
+  const title = TITLE[mode];
   const message = localError ?? error;
 
   return (
@@ -138,6 +167,27 @@ export function StatusReasonDialog({
                   ))}
                 </select>
               )}
+            </div>
+          ) : mode === 'CONCLUIR' ? (
+            <div>
+              <label htmlFor="completionNote" className="field-label">
+                Observação de finalização <span aria-hidden className="text-red-500">*</span>
+              </label>
+              <textarea
+                id="completionNote"
+                ref={(node) => {
+                  firstFieldRef.current = node;
+                }}
+                className="field-input min-h-28 resize-y"
+                maxLength={MAX_COMPLETION_NOTE_LENGTH}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder="Ex.: inversor reiniciado e geração normalizada; conexões reapertadas."
+              />
+              <p className="mt-1 text-xs text-ink-500">
+                Descreva o que foi feito no atendimento. A observação fica no registro e no
+                histórico, com data, hora e autor.
+              </p>
             </div>
           ) : (
             <div>

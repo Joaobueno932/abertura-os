@@ -130,6 +130,7 @@ O frontend **nunca** calcula esse número.
 - **Retroceder** um registro encerrado (Concluída/Cancelada) é ação de
   administrador **e exige justificativa escrita**.
 - **Cancelar** exige escolher um **motivo cadastrado**.
+- **Concluir** exige a **observação de finalização**, de qualquer perfil.
 - Uma OS **Cancelada** só pode ser editada por administrador.
 
 A movimentação acontece por drag-and-drop no Kanban **ou** pelo seletor em cada
@@ -159,6 +160,25 @@ cancelamentos comparáveis entre si em qualquer relatório.
 Reabrir limpa o motivo do registro — ele deixou de valer —, mas o histórico
 guarda qual era.
 
+### Observação de finalização
+
+Concluir **nunca** é um clique só. Tanto o botão da tela de detalhes quanto o
+Kanban (arrastar para a coluna Concluída ou escolhê-la no seletor do card) abrem
+um diálogo obrigatório pedindo o relato do que foi feito no atendimento —
+mínimo de 5 e máximo de 1000 caracteres. A exigência vale para **todos os
+perfis**, inclusive administrador: concluir não é ação de risco a ser liberada,
+é o momento em que o atendimento precisa ficar documentado.
+
+O texto é gravado no próprio registro (`ServiceOrder.completionNote` e
+`UtilityTicket.completionNote`), aparece em uma seção própria da tela de
+detalhes, entra no **documento oficial** da OS (PDF e DOCX, logo após a
+descrição) e vai para o evento `STATUS_ALTERADO`. Diferente dos outros campos de
+texto, **não passa pela padronização** de `src/lib/text.ts`: vale preservar
+exatamente o que o técnico escreveu, inclusive as quebras de linha.
+
+Retroceder limpa a observação do registro — ela deixou de valer —, mas o
+histórico guarda qual era, com data, hora e autor.
+
 ### Justificativa para retroceder
 
 Um usuário comum **não retrocede** uma OS Concluída ou Cancelada: o botão e o
@@ -166,8 +186,8 @@ seletor do Kanban ficam desabilitados e a API responde 403. O administrador
 consegue, e o diálogo pede um texto (mínimo de 5 caracteres) que vai para o
 evento `STATUS_ALTERADO`, junto com data, hora e autor.
 
-Motivo de cancelamento e justificativa de reabertura chegam pela mesma rota
-(`PATCH /api/os/[id]/status`), mas **quem decide se são obrigatórios é o
+Motivo de cancelamento, observação de finalização e justificativa de reabertura
+chegam pela mesma rota (`PATCH /api/os/[id]/status`), mas **quem decide se são obrigatórios é o
 servidor**, que conhece o status atual do registro — o cliente não tem como
 pular a exigência.
 
@@ -334,8 +354,8 @@ distinguir de relance, o card do chamado é **azul claro** e traz a etiqueta
 "Concessionária" e o protocolo. O filtro **Tipo** (OS e chamados / Ordens de
 Serviço / Chamados da concessionária) separa os dois quando necessário.
 
-As regras de status são as mesmas: motivo cadastrado para cancelar, e
-administrador mais justificativa para retroceder.
+As regras de status são as mesmas: motivo cadastrado para cancelar, observação
+de finalização para concluir, e administrador mais justificativa para retroceder.
 
 ## Documento oficial
 
@@ -444,6 +464,10 @@ atendimento** com a memória de cálculo por bloco (serviço técnico e
 deslocamento), a faixa **TOTAL DO ATENDIMENTO** e a área **Aprovação do serviço**
 (nome, cargo/função, data e assinatura).
 
+Depois da descrição entra a **Observação de finalização**, logo abaixo do que foi
+pedido — o que foi feito fica ao lado do que se pediu. A seção só existe quando a
+OS está concluída: antes disso não há nada a relatar.
+
 ### O valor em página separada
 
 A seção de valor começa sempre em uma página nova, mesmo que a OS termine no meio
@@ -549,8 +573,8 @@ detalhamento dos campos alterados (valor anterior → novo):
 `Previsão alterada` · `Informações editadas` · `Custos alterados` ·
 `Documento gerado`
 
-O evento de status guarda também o **motivo do cancelamento** e a
-**justificativa de reabertura**, quando existirem.
+O evento de status guarda também o **motivo do cancelamento**, a **observação de
+finalização** e a **justificativa de reabertura**, quando existirem.
 
 Só dados de negócio já visíveis na própria OS são gravados — nenhum segredo,
 token ou credencial.
@@ -627,7 +651,7 @@ constraints, `ON DELETE`, tipos e concorrência real — e não o de outro banco
 | `tests/text.test.ts` | Padronização de texto, caixa alta da descrição, datas, nome de arquivo |
 | `tests/service.test.ts` | Criação, edição, status, histórico, filtros, paginação, cadastros inativos, integridade histórica |
 | `tests/permissions.test.ts` | Usuário comum barrado na API administrativa, cadastro liberado de clientes/usinas sem poder excluir, 401 sem sessão, exclusão lógica, bloqueio enquanto a troca de senha inicial está pendente |
-| `tests/tickets.test.ts` | Chamado da concessionária: numeração própria, prazo, atraso, motivo de cancelamento, retrocesso restrito, quadro unificado e busca por protocolo |
+| `tests/tickets.test.ts` | Chamado da concessionária: numeração própria, prazo, atraso, motivo de cancelamento, observação de finalização, retrocesso restrito, quadro unificado e busca por protocolo |
 | `tests/documents.test.ts` | DOCX/PDF gerados, template preservado byte a byte, `sectPr` intacto, valores e memória de cálculo, PDF íntegro |
 
 Os testes de concorrência abrem 20 e 50 OS simultâneas e verificam que saem
